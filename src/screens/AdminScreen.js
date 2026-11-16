@@ -1,12 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { adminSupabase } from '../supabaseClient';
-import {
-  deleteRejectedReportsInDb,
-  fetchAdminReports,
-  updateReportStatusInDb,
-} from '../services/adminService';
+import { supabase } from '../supabaseClient';
 
-// Hoisted Helper Functions
+// Hoisted Helper Functions (TDZ Safe & Production Ready)
 function parsePhotos(raw) {
   if (!raw) return [];
   if (Array.isArray(raw)) {
@@ -46,7 +41,7 @@ function getSubmitterInfo(reportObj, profiles = []) {
   const matchedProfile = profiles.find((p) => p.device_id && p.device_id === reportObj.device_id);
   if (matchedProfile) {
     return {
-      username: matchedProfile.username || matchedProfile.full_name || `Device ID: ${matchedProfile.device_id}`,
+      username: matchedProfile.username || `Device ID: ${matchedProfile.device_id}`,
       deviceId: matchedProfile.device_id,
       status: matchedProfile.verification_status || 'GUEST',
       phone: matchedProfile.phone_number || null,
@@ -65,12 +60,12 @@ function getSubmitterInfo(reportObj, profiles = []) {
 function getUserSubmissions(userObj, reports = []) {
   if (!userObj) return [];
   return reports.filter((r) => 
-    (userObj.auth_user_id && r.auth_user_id === userObj.auth_user_id) ||
     (userObj.device_id && r.device_id === userObj.device_id) ||
     (userObj.username && (r.sender_name === userObj.username || r.username === userObj.username))
   );
 }
 
+// SMS Notification Dispatcher Utility
 function dispatchSmsNotification(profile, messageText) {
   if (!profile) {
     return { sent: false, reason: 'GUEST_DEVICE', notice: 'In-app update sent to guest device.' };
@@ -93,24 +88,29 @@ function dispatchSmsNotification(profile, messageText) {
 
 export default function AdminScreen({ onBack }) {
   const [currentView, setCurrentView] = useState('DASHBOARD'); 
-  const [submittedSubTab, setSubmittedSubTab] = useState('PENDING'); 
+  const [submittedSubTab, setSubmittedSubTab] = useState('QUEUE'); 
   const [activeSubTab, setActiveSubTab] = useState('TRACKER'); 
   const [userSubTab, setUserSubTab] = useState('VERIFIED'); 
   const [memoSubTab, setMemoSubTab] = useState('PART1'); 
-  const [archiveSubTab, setArchiveSubTab] = useState('RESOLVED');
+  const [resolvedSubTab, setResolvedSubTab] = useState('GROUPS'); 
 
+  // Collapsible Filter States
   const [showSubmittedFilter, setShowSubmittedFilter] = useState(false);
-  const [showArchiveFilter, setShowArchiveFilter] = useState(false);
+  const [showRejectedFilter, setShowRejectedFilter] = useState(false);
 
+  // Accordion Expand States
   const [expandedTicketId, setExpandedTicketId] = useState(null);
   const [expandedGroupId, setExpandedGroupId] = useState(null);
 
+  // Database Data States
   const [reports, setReports] = useState([]);
   const [profiles, setProfiles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedReport, setSelectedReport] = useState(null);
+  const [selectedUser, setSelectedUser] = useState(null);
   const [inspectImage, setInspectImage] = useState(null);
 
+  // Active Operations & Categorization States
   const [tagInputMap, setTagInputMap] = useState({});
   const [selectedBulkCategory, setSelectedBulkCategory] = useState('');
   const [bulkStatus, setBulkStatus] = useState('IN_PROGRESS');
@@ -118,15 +118,21 @@ export default function AdminScreen({ onBack }) {
   const [bulkPhoto, setBulkPhoto] = useState(null);
   const [bulkTeam, setBulkTeam] = useState('CDRRMO Rescue Alpha Team');
 
+  // Single Dispatch & Transmittal Memo Selection
+  const [selectedResponderTeam, setSelectedResponderTeam] = useState('CDRRMO Rescue Alpha Team');
+  const [dispatchNotes, setDispatchNotes] = useState('');
   const [selectedMemoReport, setSelectedMemoReport] = useState(null);
   const [selectedMemoCategoryGroup, setSelectedMemoCategoryGroup] = useState(null);
 
+  // Severity Filters
   const [submittedSeverityFilter, setSubmittedSeverityFilter] = useState('ALL');
-  const [archiveSeverityFilter, setArchiveSeverityFilter] = useState('ALL');
+  const [rejectedSeverityFilter, setRejectedSeverityFilter] = useState('ALL');
 
+  // Analytics & Date Range States
   const [customStartDate, setCustomStartDate] = useState('2026-10-24');
   const [customEndDate, setCustomEndDate] = useState('2026-10-31');
 
+  // SMS Notification Audit Log State
   const [smsLogs, setSmsLogs] = useState([]);
 
   const responderTeams = [
@@ -143,13 +149,21 @@ export default function AdminScreen({ onBack }) {
   const fetchAdminData = async () => {
     setIsLoading(true);
     try {
-      const fetchedReports = await fetchAdminReports();
-      if (fetchedReports) setReports(fetchedReports);
+      const { data: repData, error: repErr } = await supabase
+        .from('reports')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-      const { data: profData, error: profileError } = await adminSupabase
+      if (repErr) throw repErr;
+
+      const { data: profData, error: profErr } = await supabase
         .from('profiles')
-        .select('*');
-      if (profileError) throw profileError;
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (profErr) throw profErr;
+
+      if (repData) setReports(repData);
       if (profData) setProfiles(profData);
     } catch (err) {
       console.error('Error fetching admin data:', err.message);
@@ -158,9 +172,16 @@ export default function AdminScreen({ onBack }) {
     }
   };
 
+  // 1. Single Report Operational Progress Update Handler
   const handleUpdateReportStatus = async (reportId, newStatus, extraPayload = {}) => {
     try {
-      const updatedReport = await updateReportStatusInDb(reportId, newStatus, extraPayload);
+      const payload = { status: newStatus, ...extraPayload };
+      const { error } = await supabase
+        .from('reports')
+        .update(payload)
+        .eq('id', reportId);
+
+      if (error) throw error;
 
       const targetRep = reports.find((r) => r.id === reportId);
       const submitterProf = profiles.find((p) => p.device_id && p.device_id === targetRep?.device_id);
@@ -180,10 +201,10 @@ export default function AdminScreen({ onBack }) {
         ...prev
       ]);
 
-      alert("Report Update Saved!\nTicket #" + reportId + " Status: " + newStatus + "\n\n" + smsResult.notice);
+      alert("Report Update Saved!\\nTicket #" + reportId + " Status: " + newStatus + "\\n\\n" + smsResult.notice);
 
       if (selectedReport && selectedReport.id === reportId) {
-        setSelectedReport({ ...selectedReport, status: newStatus, ...extraPayload });
+        setSelectedReport({ ...selectedReport, ...payload });
       }
       fetchAdminData();
     } catch (err) {
@@ -191,17 +212,64 @@ export default function AdminScreen({ onBack }) {
     }
   };
 
+  // 2. Responder Assignment & Dispatch Handler
+  const handleAssignResponder = async (reportId) => {
+    if (!selectedResponderTeam) return alert('Please select a response team.');
+    try {
+      const payload = {
+        status: 'DISPATCHED',
+        assigned_responder: selectedResponderTeam,
+        dispatch_notes: dispatchNotes || 'Unit dispatched by CDRRMO Command Center.'
+      };
+      const { error } = await supabase
+        .from('reports')
+        .update(payload)
+        .eq('id', reportId);
+
+      if (error) throw error;
+
+      const targetRep = reports.find((r) => r.id === reportId);
+      const submitterProf = profiles.find((p) => p.device_id && p.device_id === targetRep?.device_id);
+
+      const smsResult = dispatchSmsNotification(
+        submitterProf,
+        "DISPATCH ALERT: Response unit " + selectedResponderTeam + " deployed for Report #" + reportId + "."
+      );
+
+      setSmsLogs((prev) => [
+        {
+          id: Date.now(),
+          timestamp: new Date().toLocaleTimeString(),
+          text: "[Report #" + reportId + " Dispatch] " + smsResult.notice,
+          type: smsResult.sent ? 'SUCCESS' : 'SKIPPED'
+        },
+        ...prev
+      ]);
+
+      alert("Responder Team Assigned!\\nUnit " + selectedResponderTeam + " assigned to Report #" + reportId + ".\\n\\n" + smsResult.notice);
+
+      if (selectedReport && selectedReport.id === reportId) {
+        setSelectedReport({ ...selectedReport, ...payload });
+      }
+      setDispatchNotes('');
+      fetchAdminData();
+    } catch (err) {
+      alert("Assignment failed: " + err.message);
+    }
+  };
+
+  // 3. Category Tagging Handler
   const handleCategorizeReport = async (reportId, categoryName) => {
     if (!categoryName || !categoryName.trim()) return alert('Please type a category name.');
     try {
-      const { error } = await adminSupabase
+      const { error } = await supabase
         .from('reports')
         .update({ category: categoryName.trim() })
         .eq('id', reportId);
 
       if (error) throw error;
 
-      alert('Category tag saved: "' + categoryName.trim() + '" for Report #' + reportId);
+      alert('Category tag saved: "' + categoryName + '" for Report #' + reportId);
       setTagInputMap({ ...tagInputMap, [reportId]: '' });
       fetchAdminData();
     } catch (err) {
@@ -209,6 +277,7 @@ export default function AdminScreen({ onBack }) {
     }
   };
 
+  // 4. Automated Directive Generator
   const generateAutomatedDirectiveNotice = (catName, status, teamName, count) => {
     const matching = activeTrackerReports.filter(
       (r) => (r.category || r.hazard_type || '').toUpperCase() === (catName || '').toUpperCase()
@@ -234,23 +303,24 @@ export default function AdminScreen({ onBack }) {
 
   useEffect(() => {
     if (selectedBulkCategory && bulkStatus && bulkTeam) {
-      const matchingCount = reports.filter(
-        (r) => (r.category || '').toUpperCase() === selectedBulkCategory.toUpperCase()
+      const matchingCount = activeTrackerReports.filter(
+        (r) => (r.category || r.hazard_type || '').toUpperCase() === selectedBulkCategory.toUpperCase()
       ).length;
       const autoText = generateAutomatedDirectiveNotice(selectedBulkCategory, bulkStatus, bulkTeam, matchingCount);
       setBulkNotice(autoText);
     }
   }, [selectedBulkCategory, bulkStatus, bulkTeam]);
 
+  // 5. Category Bulk Operations Handler
   const handleBulkBroadcast = async () => {
     if (!selectedBulkCategory) return alert('Please select an active category group.');
 
     if (bulkStatus === 'RESOLVED' && !bulkPhoto) {
-      return alert('Mandatory Completion Photo Proof Required!\nPlease attach an on-site completion photo proof before marking this category group as RESOLVED.');
+      return alert('Mandatory Completion Photo Proof Required!\\nPlease attach an on-site completion photo proof before marking this category group as RESOLVED.');
     }
 
-    const matching = reports.filter(
-      (r) => (r.category || '').toUpperCase() === selectedBulkCategory.toUpperCase()
+    const matching = activeTrackerReports.filter(
+      (r) => (r.category || r.hazard_type || '').toUpperCase() === selectedBulkCategory.toUpperCase()
     );
 
     if (matching.length === 0) return alert('No active reports found in selected category.');
@@ -267,7 +337,7 @@ export default function AdminScreen({ onBack }) {
       }
 
       const ids = matching.map((r) => r.id);
-      const { error } = await adminSupabase
+      const { error } = await supabase
         .from('reports')
         .update(updatePayload)
         .in('id', ids);
@@ -294,7 +364,7 @@ export default function AdminScreen({ onBack }) {
         ...prev
       ]);
 
-      alert("Category Bulk Broadcast Executed!\nCategory: " + selectedBulkCategory + "\nUpdated Status: " + bulkStatus + "\n\n" + bulkNoticeSummary);
+      alert("Category Bulk Broadcast Executed!\\nCategory: " + selectedBulkCategory + "\\nUpdated Status: " + bulkStatus + "\\n\\n" + bulkNoticeSummary);
 
       setBulkNotice('');
       setBulkPhoto(null);
@@ -304,6 +374,7 @@ export default function AdminScreen({ onBack }) {
     }
   };
 
+  // Photo Upload Handler
   const handlePhotoUpload = (e, callback) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -328,9 +399,10 @@ export default function AdminScreen({ onBack }) {
     reader.readAsDataURL(file);
   };
 
-  const handleUpdateUserStatus = async (deviceId, newStatus) => {
+  // User Account Moderation
+  const handleUpdateUserStatus = async (deviceId, newStatus, reason = '') => {
     try {
-      const { error } = await adminSupabase
+      const { error } = await supabase
         .from('profiles')
         .update({ verification_status: newStatus })
         .eq('device_id', deviceId);
@@ -344,24 +416,31 @@ export default function AdminScreen({ onBack }) {
         ...prev
       ]);
 
-      alert("User Moderation Update Saved!\nDevice ID: " + deviceId + "\nNew Status: " + newStatus);
+      alert("User Moderation Update Saved!\\nDevice ID: " + deviceId + "\\nNew Status: " + newStatus);
       fetchAdminData();
     } catch (err) {
       alert("Moderation failed: " + err.message);
     }
   };
 
+  // Batch Purge Rejected Data
   const handlePurgeAllRejectedData = async () => {
     const rejectedList = reports.filter((r) => ['REJECTED', 'DELETED'].includes((r.status || '').toUpperCase()));
     if (rejectedList.length === 0) {
-      alert('No rejected or deleted reports found in archive.');
+      alert('No rejected or deleted reports found in database.');
       return;
     }
 
-    if (window.confirm("Are you sure you want to permanently delete all " + rejectedList.length + " rejected report records from the archive? This action cannot be undone.")) {
+    if (window.confirm("Are you sure you want to permanently delete all " + rejectedList.length + " rejected report records? This action cannot be undone.")) {
       try {
-        await deleteRejectedReportsInDb();
-        alert('All rejected archive records permanently deleted.');
+        const { error } = await supabase
+          .from('reports')
+          .delete()
+          .in('status', ['REJECTED', 'DELETED']);
+
+        if (error) throw error;
+
+        alert('All rejected report records permanently deleted from database.');
         setSelectedReport(null);
         fetchAdminData();
       } catch (err) {
@@ -390,21 +469,21 @@ CITY DISASTER RISK REDUCTION AND MANAGEMENT OFFICE (CDRRMO)
 BATANGAS COMMAND CENTER & INCIDENT ENDORSEMENT NETWORK
 ================================================================================
 
-MEMORANDUM REF NO: MEMO-AGAP-2026-\${(item.id || '001').toString().replace('#', '')}
-DATE & TIMESTAMP: \${new Date().toLocaleString()}
-SUBJECT: \${title}
+MEMORANDUM REF NO: MEMO-AGAP-2026-${(item.id || '001').toString().replace('#', '')}
+DATE & TIMESTAMP: ${new Date().toLocaleString()}
+SUBJECT: ${title}
 
 I. INCIDENT SPECIFICATION & CITIZEN REPORT SUMMARY
-Category Title: \${selectedMemoCategoryGroup ? selectedMemoCategoryGroup.category : (selectedMemoReport.hazard_type || selectedMemoReport.category)}
-Report Count: \${selectedMemoCategoryGroup ? selectedMemoCategoryGroup.reports.length : 1} Report(s)
+Category Title: ${selectedMemoCategoryGroup ? selectedMemoCategoryGroup.category : (selectedMemoReport.hazard_type || selectedMemoReport.category)}
+Report Count: ${selectedMemoCategoryGroup ? selectedMemoCategoryGroup.reports.length : 1} Report(s)
 Severity / Urgency Level: HIGH / URGENT - Action Required Within 24 Hours
-Location Sector: \${selectedMemoCategoryGroup ? selectedMemoCategoryGroup.locations.join(', ') : selectedMemoReport.location}
+Location Sector: ${selectedMemoCategoryGroup ? selectedMemoCategoryGroup.locations.join(', ') : selectedMemoReport.location}
 
 II. CITIZEN STATEMENT & INDIVIDUAL INCIDENT BREAKDOWN
-\${selectedMemoCategoryGroup ? selectedMemoCategoryGroup.reports.map((r, i) => \`• Ticket #\${r.id || r.ticket_no} - [\${r.hazard_type || r.category || 'Incident'}]: "\${r.description || 'Verified hazard entry.'}" (📍 Location: \${r.location})\`).join('\n') : \`• Ticket #\${selectedMemoReport.id || selectedMemoReport.ticket_no} - [\${selectedMemoReport.hazard_type || selectedMemoReport.category}]: "\${selectedMemoReport.description || 'Verified hazard entry.'}" (📍 Location: \${selectedMemoReport.location})\`}
+${selectedMemoCategoryGroup ? selectedMemoCategoryGroup.reports.map((r, i) => `• Ticket #${r.id || r.ticket_no} - [${r.hazard_type || r.category || 'Incident'}]: "${r.description || 'Verified hazard entry.'}" (📍 Location: ${r.location})`).join('\n') : `• Ticket #${selectedMemoReport.id || selectedMemoReport.ticket_no} - [${selectedMemoReport.hazard_type || selectedMemoReport.category}]: "${selectedMemoReport.description || 'Verified hazard entry.'}" (📍 Location: ${selectedMemoReport.location})`}
 
 III. VERIFIED CITIZEN EVIDENCE & PHOTOGRAPHIC PROOF ATTACHMENTS
-Total Evidence Photos Attached: \${selectedMemoCategoryGroup ? selectedMemoCategoryGroup.photos.length : parsePhotos(selectedMemoReport.proof_photos || selectedMemoReport.photos).length}
+Total Evidence Photos Attached: ${selectedMemoCategoryGroup ? selectedMemoCategoryGroup.photos.length : parsePhotos(selectedMemoReport.proof_photos || selectedMemoReport.photos).length}
 
 IV. MANDATED ACTION & TRANSMITTAL DIRECTIVE
 This official memorandum endorses the above incident to relevant municipal emergency agencies for field verification, site intervention, and resolution.
@@ -418,17 +497,15 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `MEMO-AGAP-2026-\${(item.id || '001').toString().replace('#', '')}.doc`;
+    link.download = `MEMO-AGAP-2026-${(item.id || '001').toString().replace('#', '')}.doc`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const pendingSubmittedReports = reports.filter((r) => 
-    (r.status || 'PENDING').toUpperCase() === 'PENDING'
-  );
-
-  const investigatedSubmittedReports = reports.filter((r) => 
+  // Data Filtering Variables
+  const submittedReports = reports.filter((r) => 
+    (r.status || 'PENDING').toUpperCase() === 'PENDING' || 
     (r.status || '').toUpperCase() === 'UNDER_INVESTIGATION'
   );
 
@@ -444,61 +521,87 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
     ['REJECTED', 'DELETED'].includes((r.status || '').toUpperCase())
   );
 
-  const filteredPendingReports = pendingSubmittedReports.filter((r) => {
-    if (submittedSeverityFilter === 'ALL') return true;
-    return (r.severity || 'HIGH').toUpperCase() === submittedSeverityFilter.toUpperCase();
-  });
-
-  const filteredInvestigatedReports = investigatedSubmittedReports.filter((r) => {
+  const filteredSubmittedReports = submittedReports.filter((r) => {
     if (submittedSeverityFilter === 'ALL') return true;
     return (r.severity || 'HIGH').toUpperCase() === submittedSeverityFilter.toUpperCase();
   });
 
   const filteredRejectedReports = rejectedDataReports.filter((r) => {
-    if (archiveSeverityFilter === 'ALL') return true;
-    return (r.severity || 'HIGH').toUpperCase() === archiveSeverityFilter.toUpperCase();
+    if (rejectedSeverityFilter === 'ALL') return true;
+    return (r.severity || 'HIGH').toUpperCase() === rejectedSeverityFilter.toUpperCase();
   });
 
   const activeCategoriesList = Array.from(
     new Set(
       activeTrackerReports
-        .map((r) => r.category || '')
-        .filter((c) => c && c.trim().length > 0 && c.toUpperCase() !== 'OTHER' && c.toUpperCase() !== 'UNCATEGORIZED')
+        .map((r) => r.category || r.hazard_type || '')
+        .filter((c) => c.trim().length > 0 && c.toUpperCase() !== 'OTHER')
     )
   );
 
-  const uncategorizedReports = activeTrackerReports.filter((r) => {
-    const cat = (r.category || '').trim().toUpperCase();
-    return !cat || cat === 'OTHER' || cat === 'UNCATEGORIZED';
-  });
-
-  const categorizedReports = activeTrackerReports.filter((r) => {
-    const cat = (r.category || '').trim().toUpperCase();
-    return cat && cat !== 'OTHER' && cat !== 'UNCATEGORIZED';
-  });
-
+  // Grouped Categories for Transmittal Memos
   const categoryGroupMap = {};
-  categorizedReports.forEach((rep) => {
-    const cat = rep.category.trim();
-    if (!categoryGroupMap[cat]) {
-      categoryGroupMap[cat] = {
-        id: `CAT-\${cat.toUpperCase().replace(/\s+/g, '-')}`,
-        category: cat,
-        reports: [],
-        locations: new Set(),
-        photos: []
-      };
+  reports.forEach((rep) => {
+    const cat = (rep.category || rep.hazard_type || 'Uncategorized').trim();
+    if (cat && cat.toUpperCase() !== 'OTHER' && cat.toUpperCase() !== 'UNCATEGORIZED') {
+      if (!categoryGroupMap[cat]) {
+        categoryGroupMap[cat] = {
+          id: `CAT-${cat.toUpperCase().replace(/\s+/g, '-')}`,
+          category: cat,
+          reports: [],
+          locations: new Set(),
+          photos: []
+        };
+      }
+      categoryGroupMap[cat].reports.push(rep);
+      if (rep.location) categoryGroupMap[cat].locations.add(rep.location);
+      const repPhotos = parsePhotos(rep.proof_photos || rep.photos);
+      repPhotos.forEach(p => categoryGroupMap[cat].photos.push(p));
     }
-    categoryGroupMap[cat].reports.push(rep);
-    if (rep.location) categoryGroupMap[cat].locations.add(rep.location);
-    const repPhotos = parsePhotos(rep.proof_photos || rep.photos);
-    repPhotos.forEach(p => categoryGroupMap[cat].photos.push(p));
   });
 
   const categoryGroups = Object.values(categoryGroupMap).map(g => ({
     ...g,
     locations: Array.from(g.locations)
   }));
+
+  const uncategorizedReports = reports.filter((r) => {
+    const cat = (r.category || r.hazard_type || '').toUpperCase();
+    return !cat || cat === 'OTHER' || cat === 'UNCATEGORIZED' || !categoryGroupMap[r.category || r.hazard_type];
+  });
+
+  // Grouped Categories for Resolved Archive
+  const resolvedCategoryGroupMap = {};
+  resolvedReports.forEach((rep) => {
+    const cat = (rep.category || rep.hazard_type || 'Uncategorized').trim();
+    if (cat && cat.toUpperCase() !== 'OTHER' && cat.toUpperCase() !== 'UNCATEGORIZED') {
+      if (!resolvedCategoryGroupMap[cat]) {
+        resolvedCategoryGroupMap[cat] = {
+          id: `RESOLVED-CAT-${cat.toUpperCase().replace(/\s+/g, '-')}`,
+          category: cat,
+          reports: [],
+          locations: new Set(),
+          photos: [],
+          progressPhotos: []
+        };
+      }
+      resolvedCategoryGroupMap[cat].reports.push(rep);
+      if (rep.location) resolvedCategoryGroupMap[cat].locations.add(rep.location);
+      const repPhotos = parsePhotos(rep.proof_photos || rep.photos);
+      repPhotos.forEach(p => resolvedCategoryGroupMap[cat].photos.push(p));
+      if (rep.progress_photo) resolvedCategoryGroupMap[cat].progressPhotos.push(rep.progress_photo);
+    }
+  });
+
+  const resolvedCategoryGroups = Object.values(resolvedCategoryGroupMap).map(g => ({
+    ...g,
+    locations: Array.from(g.locations)
+  }));
+
+  const resolvedUncategorizedReports = resolvedReports.filter((r) => {
+    const cat = (r.category || r.hazard_type || '').toUpperCase();
+    return !cat || cat === 'OTHER' || cat === 'UNCATEGORIZED' || !resolvedCategoryGroupMap[r.category || r.hazard_type];
+  });
 
   const verifiedCitizens = profiles
     .filter((p) => (p.verification_status || '').toUpperCase() === 'VERIFIED')
@@ -512,6 +615,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
     .filter((p) => p.id_proof_photo && (p.verification_status || '').toUpperCase() !== 'VERIFIED')
     .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
 
+  // Vector Line Analytics Data Generator
   const getVectorLineAnalyticsData = () => {
     const start = new Date(customStartDate);
     const end = new Date(customEndDate);
@@ -568,7 +672,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
     const falseCoords = getCoords(falseCounts);
 
     const makeSvgPath = (coords) => {
-      return coords.map((pt, i) => `\${i === 0 ? 'M' : 'L'} \${pt.x} \${pt.y}`).join(' ');
+      return coords.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ');
     };
 
     return {
@@ -597,16 +701,9 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
 
   return (
     <div style={styles.container}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap');
-        
-        * {
-          font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
-          -webkit-font-smoothing: antialiased;
-          -moz-osx-font-smoothing: grayscale;
-        }
-      `}</style>
-      
+      {/* Global Typography Reset */}
+      <style>{}</style>
+
       {/* Top Header Bar */}
       <div style={styles.navHeader}>
         <button 
@@ -631,9 +728,10 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
           <div style={styles.welcomeBanner}>
             <div style={styles.welcomeTag}>CDRRMO COMMAND CENTER</div>
             <h3 style={styles.welcomeTitle}>Hello, Admin!</h3>
-            <p style={styles.welcomeSubtext}>Welcome back to Project AGAP. Monitor hazards, manage triage queues & coordinate community safety.</p>
+            <p style={styles.welcomeSubtext}>Welcome back to Project AGAP. Monitor hazards, dispatch rescue units & manage community safety.</p>
           </div>
 
+          {/* SMS Notification Gateway Activity Status */}
           <div style={styles.smsStatusCard}>
             <div style={styles.smsStatusHeader}>
               <span style={styles.smsStatusTitle}>SMS NOTIFICATION DISPATCH GATEWAY</span>
@@ -657,7 +755,9 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
 
           <div style={styles.moduleSectionTitle}>CORE ADMIN FUNCTIONS</div>
           
+          {/* Table-Like 5 Module List */}
           <div style={styles.tableCardContainer}>
+            {/* Module 1: Submitted Queue & Archive */}
             <div style={styles.tableRow} onClick={() => setCurrentView('SUBMITTED_REPORTS')}>
               <div style={styles.tableColIcon}>
                 <div style={styles.iconBoxAmber}>
@@ -670,14 +770,15 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                 </div>
               </div>
               <div style={styles.tableColContent}>
-                <div style={styles.tableTitle}>Submitted Queue & Investigation</div>
-                <div style={styles.tableDesc}>Review incoming reports, investigate & accept/reject reviewed tickets</div>
+                <div style={styles.tableTitle}>Submitted Queue & Archive</div>
+                <div style={styles.tableDesc}>Review incoming reports, triage submissions & manage rejected archive</div>
               </div>
               <div style={styles.tableColBadge}>
-                <span style={styles.badgeOrange}>{pendingSubmittedReports.length + investigatedSubmittedReports.length} Queue</span>
+                <span style={styles.badgeOrange}>{submittedReports.length} Queue</span>
               </div>
             </div>
 
+            {/* Module 2: Active Operations */}
             <div style={styles.tableRow} onClick={() => setCurrentView('ACTIVE_OPERATIONS')}>
               <div style={styles.tableColIcon}>
                 <div style={styles.iconBoxTeal}>
@@ -690,13 +791,14 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
               </div>
               <div style={styles.tableColContent}>
                 <div style={styles.tableTitle}>Active Operations</div>
-                <div style={styles.tableDesc}>Track progress, categorize individual tickets, bulk operations & memos</div>
+                <div style={styles.tableDesc}>Track progress, assign rescue teams & broadcast category updates</div>
               </div>
               <div style={styles.tableColBadge}>
                 <span style={styles.badgeTeal}>{activeTrackerReports.length} Active</span>
               </div>
             </div>
 
+            {/* Module 3: User Management */}
             <div style={styles.tableRow} onClick={() => setCurrentView('USER_HANDLING')}>
               <div style={styles.tableColIcon}>
                 <div style={styles.iconBoxPurple}>
@@ -717,6 +819,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
               </div>
             </div>
 
+            {/* Module 4: Transmittal Memos */}
             <div style={styles.tableRow} onClick={() => setCurrentView('DOCUMENT_GENERATOR')}>
               <div style={styles.tableColIcon}>
                 <div style={styles.iconBoxEmerald}>
@@ -736,29 +839,32 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
               </div>
             </div>
 
+            {/* Module 5: Resolved Incident Archive */}
             <div style={styles.tableRowLast} onClick={() => setCurrentView('RESOLVED_ARCHIVE')}>
               <div style={styles.tableColIcon}>
                 <div style={styles.iconBoxSlate}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0F766E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 8v13H3V8M1 3h22v5H1V3z"/>
-                    <line x1="10" y1="12" x2="14" y2="12"/>
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
                   </svg>
                 </div>
               </div>
               <div style={styles.tableColContent}>
-                <div style={styles.tableTitle}>Archive</div>
-                <div style={styles.tableDesc}>History of resolved individual incidents & clean rejected archive logs</div>
+                <div style={styles.tableTitle}>Resolved Incident Archive</div>
+                <div style={styles.tableDesc}>View history of resolved hazard incidents, grouped categories & completion proofs</div>
               </div>
               <div style={styles.tableColBadge}>
-                <span style={styles.badgeTeal}>{resolvedReports.length + rejectedDataReports.length} Archived</span>
+                <span style={styles.badgeTeal}>{resolvedReports.length} Resolved</span>
               </div>
             </div>
           </div>
 
+          {/* Section Divider */}
           <div style={styles.dividerRow}>
             <span style={styles.dividerLabel}>INCIDENT SUBMISSION STATISTICS & ANALYTICS</span>
           </div>
 
+          {/* Vector Line Graph Analytics */}
           <div style={styles.chartCard}>
             <div style={styles.chartControlRow}>
               <div style={styles.chartTitleTag}>CUSTOM DATE RANGE ANALYTICS</div>
@@ -779,6 +885,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
               </div>
             </div>
 
+            {/* SVG Vector Line Graph */}
             <div style={styles.svgGraphBox}>
               <svg width="100%" height="120" viewBox="0 0 360 120" style={{ overflow: 'visible' }}>
                 <defs>
@@ -788,18 +895,20 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                   </linearGradient>
                 </defs>
 
+                {/* Y-Axis Line */}
                 <line x1="24" y1="10" x2="24" y2="92" stroke="#334155" strokeWidth="1.5" />
                 <text x="18" y="16" fontSize="7" fontWeight="700" fill="#64748B" textAnchor="end">{analyticsData.maxVal}</text>
                 <text x="18" y="54" fontSize="7" fontWeight="700" fill="#64748B" textAnchor="end">{Math.round(analyticsData.maxVal / 2)}</text>
                 <text x="18" y="92" fontSize="7" fontWeight="700" fill="#64748B" textAnchor="end">0</text>
 
+                {/* X-Axis Baseline */}
                 <line x1="24" y1="92" x2="345" y2="92" stroke="#334155" strokeWidth="1.5" />
                 <line x1="24" y1="52" x2="345" y2="52" stroke="#E2E8F0" strokeWidth="1" strokeDasharray="3,3" />
                 <line x1="24" y1="14" x2="345" y2="14" stroke="#E2E8F0" strokeWidth="1" strokeDasharray="3,3" />
 
                 {analyticsData.validCoords.length > 0 && (
                   <path
-                    d={`\${analyticsData.validPath} L \${analyticsData.validCoords[analyticsData.validCoords.length - 1].x} 92 L \${analyticsData.validCoords[0].x} 92 Z`}
+                    d={`${analyticsData.validPath} L ${analyticsData.validCoords[analyticsData.validCoords.length - 1].x} 92 L ${analyticsData.validCoords[0].x} 92 Z`}
                     fill="url(#tealArea)"
                   />
                 )}
@@ -831,32 +940,34 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
         </div>
       )}
 
-      {/* MODULE 1: SUBMITTED QUEUE & INVESTIGATION */}
+      {/* MODULE 1: SUBMITTED QUEUE & ARCHIVE */}
       {currentView === 'SUBMITTED_REPORTS' && (
         <div style={styles.sectionStack}>
           <div style={styles.subTabContainer}>
             <button
-              style={submittedSubTab === 'PENDING' ? styles.subTabBtnActive : styles.subTabBtnInactive}
-              onClick={() => setSubmittedSubTab('PENDING')}
+              style={submittedSubTab === 'QUEUE' ? styles.subTabBtnActive : styles.subTabBtnInactive}
+              onClick={() => setSubmittedSubTab('QUEUE')}
             >
-              Submitted Queue ({pendingSubmittedReports.length})
+              Pending Triage Queue ({submittedReports.length})
             </button>
             <button
-              style={submittedSubTab === 'INVESTIGATED' ? styles.subTabBtnActive : styles.subTabBtnInactive}
-              onClick={() => setSubmittedSubTab('INVESTIGATED')}
+              style={submittedSubTab === 'ARCHIVE' ? styles.subTabBtnActive : styles.subTabBtnInactive}
+              onClick={() => setSubmittedSubTab('ARCHIVE')}
             >
-              Investigated Queue ({investigatedSubmittedReports.length})
+              Rejected Archive ({rejectedDataReports.length})
             </button>
           </div>
 
-          {submittedSubTab === 'PENDING' && (
+          {/* Sub-Tab 1: Pending Queue */}
+          {submittedSubTab === 'QUEUE' && (
             <div style={styles.sectionStack}>
+              {/* Collapsible Filter Bar Toggle */}
               <div style={{ marginBottom: '8px' }}>
                 <button
                   style={styles.btnToggleFilter}
                   onClick={() => setShowSubmittedFilter(!showSubmittedFilter)}
                 >
-                  Filter by Severity {showSubmittedFilter ? '▲' : '▼'} {submittedSeverityFilter !== 'ALL' ? `(\${submittedSeverityFilter})` : ''}
+                  Filter by Severity {showSubmittedFilter ? '▲' : '▼'} {submittedSeverityFilter !== 'ALL' ? `(${submittedSeverityFilter})` : ''}
                 </button>
 
                 {showSubmittedFilter && (
@@ -875,37 +986,38 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                 )}
               </div>
 
-              {filteredPendingReports.length === 0 ? (
-                <div style={styles.emptyCard}>No pending submitted reports in queue.</div>
+              {filteredSubmittedReports.length === 0 ? (
+                <div style={styles.emptyCard}>No pending report submissions found matching filter.</div>
               ) : (
-                filteredPendingReports.map((rep) => {
+                filteredSubmittedReports.map((rep) => {
                   const isExpanded = expandedTicketId === rep.id;
                   const photoList = parsePhotos(rep.proof_photos || rep.photos);
                   const submitter = getSubmitterInfo(rep, profiles);
-                  const ticketNum = rep.id || rep.ticket_no || 'TKT-001';
-                  const title = rep.hazard_type || rep.category || 'Hazard Incident';
-                  const status = rep.status || 'PENDING';
-                  const ticketTitle = rep.description || 'Verified hazard entry.';
-
                   return (
                     <div key={rep.id} style={styles.itemCardAccordion} onClick={() => setExpandedTicketId(isExpanded ? null : rep.id)}>
                       <div style={styles.cardHeaderRow}>
                         <div style={styles.headerTitleGroup}>
-                          <span style={styles.ticketBadge}>{ticketNum}</span>
-                          <span style={styles.badgeOrange}>{status}</span>
+                          <span style={styles.ticketBadge}>{rep.id || rep.ticket_no}</span>
                           <span style={getSeverityBadgeStyle(rep.severity)}>{(rep.severity || 'HIGH').toUpperCase()}</span>
                         </div>
                         <span style={styles.userMetaText}>Device ID: {submitter.deviceId}</span>
                       </div>
 
-                      <h4 style={styles.itemTitle}>{title}</h4>
-                      <p style={styles.ticketSubTitleText}>"{ticketTitle}"</p>
+                      <h4 style={styles.itemTitle}>{rep.hazard_type || rep.category || 'Hazard Incident Report'}</h4>
 
                       {!isExpanded ? (
-                        <div style={styles.expandHintText}>Click to expand full details & investigation controls &rarr;</div>
+                        <div style={styles.expandHintText}>Click to expand full details & process controls &rarr;</div>
                       ) : (
                         <div style={styles.accordionDetailBox} onClick={(e) => e.stopPropagation()}>
                           <div style={styles.detailGridPlain}>
+                            <div style={styles.detailRowPlain}>
+                              <span style={styles.fieldLabel}>HAZARD / ISSUE TYPE:</span>
+                              <span style={styles.fieldValText}>{rep.hazard_type || rep.category}</span>
+                            </div>
+                            <div style={styles.detailRowPlain}>
+                              <span style={styles.fieldLabel}>SEVERITY URGENCY LEVEL:</span>
+                              <span style={getSeverityBadgeStyle(rep.severity)}>{(rep.severity || 'HIGH').toUpperCase()}</span>
+                            </div>
                             <div style={styles.detailRowPlain}>
                               <span style={styles.fieldLabel}>LOCATION LANDMARK:</span>
                               <span style={styles.fieldValText}>{rep.location}</span>
@@ -916,11 +1028,12 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                             </div>
                           </div>
 
+                          {/* Google Maps Preview */}
                           <div style={styles.mapContainerBox}>
                             <span style={styles.fieldLabel}>LOCATION MAP PREVIEW (Click to open Google Maps):</span>
                             <div 
                               style={styles.gpsMapBoxInteractive} 
-                              onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=\${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}`, '_blank')}
+                              onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}`, '_blank')}
                               title="Click to open in Google Maps"
                             >
                               <iframe
@@ -929,11 +1042,16 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                                 height="130"
                                 frameBorder="0"
                                 scrolling="no"
-                                src={`https://maps.google.com/maps?q=\${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}&t=m&z=16&ie=UTF8&iwloc=&output=embed`}
+                                src={`https://maps.google.com/maps?q=${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}&t=m&z=16&ie=UTF8&iwloc=&output=embed`}
                                 style={{ borderRadius: '6px', pointerEvents: 'none' }}
                               ></iframe>
                               <div style={styles.mapOverlayBadge}>Open in Google Maps &rarr;</div>
                             </div>
+                          </div>
+
+                          <div style={styles.detailSectionPlain}>
+                            <span style={styles.fieldLabel}>SITUATION DESCRIPTION / REMARKS:</span>
+                            <p style={styles.descTextPlain}>{rep.description || 'No descriptive details provided by submitter.'}</p>
                           </div>
 
                           {photoList.length > 0 && (
@@ -944,7 +1062,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                                   <img
                                     key={idx}
                                     src={src}
-                                    alt={`Evidence \${idx + 1}`}
+                                    alt={`Evidence ${idx + 1}`}
                                     style={styles.thumbImgFixed}
                                     onClick={() => setInspectImage(src)}
                                   />
@@ -953,18 +1071,41 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                             </div>
                           )}
 
+                          {/* Category Tagging */}
+                          <div style={styles.tagFormRow}>
+                            <input
+                              type="text"
+                              style={styles.textInputCompact}
+                              placeholder="Type category tag (e.g. Rizal Ave Flooding)..."
+                              value={tagInputMap[rep.id] || ''}
+                              onChange={(e) => setTagInputMap({ ...tagInputMap, [rep.id]: e.target.value })}
+                            />
+                            <button
+                              style={styles.btnTagAction}
+                              onClick={() => handleCategorizeReport(rep.id, tagInputMap[rep.id])}
+                            >
+                              Save Category Tag
+                            </button>
+                          </div>
+
                           <div style={styles.actionRow}>
                             <button
                               style={styles.btnInvestigate}
                               onClick={() => handleUpdateReportStatus(rep.id, 'UNDER_INVESTIGATION')}
                             >
-                              Investigate Ticket
+                              Investigate
+                            </button>
+                            <button
+                              style={styles.btnApprove}
+                              onClick={() => handleUpdateReportStatus(rep.id, 'APPROVED')}
+                            >
+                              Approve Report
                             </button>
                             <button
                               style={styles.btnReject}
                               onClick={() => handleUpdateReportStatus(rep.id, 'REJECTED')}
                             >
-                              Reject Ticket
+                              Reject Report
                             </button>
                           </div>
                         </div>
@@ -976,39 +1117,74 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
             </div>
           )}
 
-          {submittedSubTab === 'INVESTIGATED' && (
+          {/* Sub-Tab 2: Rejected Archive */}
+          {submittedSubTab === 'ARCHIVE' && (
             <div style={styles.sectionStack}>
-              {filteredInvestigatedReports.length === 0 ? (
-                <div style={styles.emptyCard}>No investigated tickets awaiting review.</div>
+              <div style={styles.archiveHeaderRow}>
+                <span style={styles.archiveNoticeText}>Archived History of Rejected Incident Records</span>
+                <button style={styles.btnPurgeAll} onClick={handlePurgeAllRejectedData}>
+                  Purge All Rejected Data
+                </button>
+              </div>
+
+              {/* Collapsible Filter Bar Toggle */}
+              <div style={{ marginBottom: '8px' }}>
+                <button
+                  style={styles.btnToggleFilter}
+                  onClick={() => setShowRejectedFilter(!showRejectedFilter)}
+                >
+                  Filter by Severity {showRejectedFilter ? '▲' : '▼'} {rejectedSeverityFilter !== 'ALL' ? `(${rejectedSeverityFilter})` : ''}
+                </button>
+
+                {showRejectedFilter && (
+                  <div style={styles.filterBarRow}>
+                    <span style={styles.filterLabel}>SEVERITY LEVEL:</span>
+                    {['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((sev) => (
+                      <button
+                        key={sev}
+                        style={rejectedSeverityFilter === sev ? styles.filterBtnActive : styles.filterBtnInactive}
+                        onClick={() => setRejectedSeverityFilter(sev)}
+                      >
+                        {sev}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {filteredRejectedReports.length === 0 ? (
+                <div style={styles.emptyCard}>No rejected incident records found matching filter.</div>
               ) : (
-                filteredInvestigatedReports.map((rep) => {
+                filteredRejectedReports.map((rep) => {
                   const isExpanded = expandedTicketId === rep.id;
                   const photoList = parsePhotos(rep.proof_photos || rep.photos);
                   const submitter = getSubmitterInfo(rep, profiles);
-                  const ticketNum = rep.id || rep.ticket_no || 'TKT-001';
-                  const title = rep.hazard_type || rep.category || 'Hazard Incident';
-                  const status = rep.status || 'UNDER_INVESTIGATION';
-                  const ticketTitle = rep.description || 'Verified hazard entry.';
-
                   return (
                     <div key={rep.id} style={styles.itemCardAccordion} onClick={() => setExpandedTicketId(isExpanded ? null : rep.id)}>
                       <div style={styles.cardHeaderRow}>
                         <div style={styles.headerTitleGroup}>
-                          <span style={styles.ticketBadge}>{ticketNum}</span>
-                          <span style={styles.badgeTeal}>{status}</span>
+                          <span style={styles.ticketBadge}>{rep.id || rep.ticket_no}</span>
+                          <span style={styles.badgeRed}>REJECTED</span>
                           <span style={getSeverityBadgeStyle(rep.severity)}>{(rep.severity || 'HIGH').toUpperCase()}</span>
                         </div>
                         <span style={styles.userMetaText}>Device ID: {submitter.deviceId}</span>
                       </div>
 
-                      <h4 style={styles.itemTitle}>{title}</h4>
-                      <p style={styles.ticketSubTitleText}>"{ticketTitle}"</p>
+                      <h4 style={styles.itemTitle}>{rep.hazard_type || rep.category || 'Hazard Incident Report'}</h4>
 
                       {!isExpanded ? (
-                        <div style={styles.expandHintText}>Click to expand & accept/reject investigated ticket &rarr;</div>
+                        <div style={styles.expandHintText}>Click to expand full details & options &rarr;</div>
                       ) : (
                         <div style={styles.accordionDetailBox} onClick={(e) => e.stopPropagation()}>
                           <div style={styles.detailGridPlain}>
+                            <div style={styles.detailRowPlain}>
+                              <span style={styles.fieldLabel}>HAZARD / ISSUE TYPE:</span>
+                              <span style={styles.fieldValText}>{rep.hazard_type || rep.category}</span>
+                            </div>
+                            <div style={styles.detailRowPlain}>
+                              <span style={styles.fieldLabel}>SEVERITY URGENCY LEVEL:</span>
+                              <span style={getSeverityBadgeStyle(rep.severity)}>{(rep.severity || 'HIGH').toUpperCase()}</span>
+                            </div>
                             <div style={styles.detailRowPlain}>
                               <span style={styles.fieldLabel}>LOCATION LANDMARK:</span>
                               <span style={styles.fieldValText}>{rep.location}</span>
@@ -1019,11 +1195,12 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                             </div>
                           </div>
 
+                          {/* Google Maps Preview */}
                           <div style={styles.mapContainerBox}>
                             <span style={styles.fieldLabel}>LOCATION MAP PREVIEW (Click to open Google Maps):</span>
                             <div 
                               style={styles.gpsMapBoxInteractive} 
-                              onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=\${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}`, '_blank')}
+                              onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}`, '_blank')}
                               title="Click to open in Google Maps"
                             >
                               <iframe
@@ -1032,11 +1209,16 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                                 height="130"
                                 frameBorder="0"
                                 scrolling="no"
-                                src={`https://maps.google.com/maps?q=\${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}&t=m&z=16&ie=UTF8&iwloc=&output=embed`}
+                                src={`https://maps.google.com/maps?q=${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}&t=m&z=16&ie=UTF8&iwloc=&output=embed`}
                                 style={{ borderRadius: '6px', pointerEvents: 'none' }}
                               ></iframe>
                               <div style={styles.mapOverlayBadge}>Open in Google Maps &rarr;</div>
                             </div>
+                          </div>
+
+                          <div style={styles.detailSectionPlain}>
+                            <span style={styles.fieldLabel}>SITUATION DESCRIPTION / REMARKS:</span>
+                            <p style={styles.descTextPlain}>{rep.description || 'No descriptive details provided by submitter.'}</p>
                           </div>
 
                           {photoList.length > 0 && (
@@ -1047,7 +1229,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                                   <img
                                     key={idx}
                                     src={src}
-                                    alt={`Evidence \${idx + 1}`}
+                                    alt={`Evidence ${idx + 1}`}
                                     style={styles.thumbImgFixed}
                                     onClick={() => setInspectImage(src)}
                                   />
@@ -1059,15 +1241,9 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                           <div style={styles.actionRow}>
                             <button
                               style={styles.btnApprove}
-                              onClick={() => handleUpdateReportStatus(rep.id, 'APPROVED')}
+                              onClick={() => handleUpdateReportStatus(rep.id, 'PENDING')}
                             >
-                              Accept / Approve Ticket
-                            </button>
-                            <button
-                              style={styles.btnReject}
-                              onClick={() => handleUpdateReportStatus(rep.id, 'REJECTED')}
-                            >
-                              Reject Ticket
+                              Restore to Queue
                             </button>
                           </div>
                         </div>
@@ -1089,141 +1265,53 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
               style={activeSubTab === 'TRACKER' ? styles.subTabBtnActive : styles.subTabBtnInactive}
               onClick={() => setActiveSubTab('TRACKER')}
             >
-              Active Individual Tickets ({activeTrackerReports.length})
+              Active Incident Tracker ({activeTrackerReports.length})
             </button>
             <button
               style={activeSubTab === 'BULK' ? styles.subTabBtnActive : styles.subTabBtnInactive}
               onClick={() => setActiveSubTab('BULK')}
             >
-              Category Bulk Operations & Memos
+              Category Bulk Operations
             </button>
           </div>
 
+          {/* Sub-Tab 1: Incident Tracker */}
           {activeSubTab === 'TRACKER' && (
             <div style={styles.sectionStack}>
-              <div style={styles.sectionSubTitle}>UNCATEGORIZED INDIVIDUAL TICKETS ({uncategorizedReports.length})</div>
-              {uncategorizedReports.length === 0 ? (
-                <div style={styles.emptyCard}>No uncategorized active tickets. All active tickets are currently assigned categories.</div>
+              {activeTrackerReports.length === 0 ? (
+                <div style={styles.emptyCard}>No active incident reports in progress.</div>
               ) : (
-                uncategorizedReports.map((rep) => {
+                activeTrackerReports.map((rep) => {
                   const submitter = getSubmitterInfo(rep, profiles);
                   const isExpanded = expandedTicketId === rep.id;
                   const photoList = parsePhotos(rep.proof_photos || rep.photos);
-                  const ticketNum = rep.id || rep.ticket_no || 'TKT-001';
-                  const title = rep.hazard_type || rep.category || 'Active Hazard';
-                  const ticketTitle = rep.description || 'Verified hazard entry.';
-
                   return (
                     <div key={rep.id} style={styles.itemCardAccordion} onClick={() => setExpandedTicketId(isExpanded ? null : rep.id)}>
                       <div style={styles.cardHeaderRow}>
                         <div style={styles.headerTitleGroup}>
-                          <span style={styles.ticketBadge}>{ticketNum}</span>
-                          <span style={styles.badgeOrange}>UNCATEGORIZED</span>
+                          <span style={styles.ticketBadge}>{rep.id || rep.ticket_no}</span>
+                          <span style={styles.badgeTeal}>{rep.status}</span>
                         </div>
                         <span style={styles.userMetaText}>Device ID: {submitter.deviceId}</span>
                       </div>
 
-                      <h4 style={styles.itemTitle}>{title}</h4>
-                      <p style={styles.ticketSubTitleText}>"{ticketTitle}"</p>
+                      <h4 style={styles.itemTitle}>{rep.hazard_type || rep.category}</h4>
 
-                      {!isExpanded ? (
-                        <div style={styles.expandHintText}>Click to expand, assign category & manage operations &rarr;</div>
-                      ) : (
-                        <div style={styles.accordionDetailBox} onClick={(e) => e.stopPropagation()}>
-                          <div style={styles.detailGridPlain}>
-                            <div style={styles.detailRowPlain}>
-                              <span style={styles.fieldLabel}>SEVERITY URGENCY LEVEL:</span>
-                              <span style={getSeverityBadgeStyle(rep.severity)}>{(rep.severity || 'HIGH').toUpperCase()}</span>
-                            </div>
-                            <div style={styles.detailRowPlain}>
-                              <span style={styles.fieldLabel}>LOCATION LANDMARK:</span>
-                              <span style={styles.fieldValText}>{rep.location}</span>
-                            </div>
-                          </div>
-
-                          <div style={styles.tagFormRow}>
-                            <input
-                              type="text"
-                              style={styles.textInputCompact}
-                              placeholder="Assign Category (e.g. Flooding, Road Damage)..."
-                              value={tagInputMap[`cat_\${rep.id}`] || ''}
-                              onChange={(e) => setTagInputMap({ ...tagInputMap, [`cat_\${rep.id}`]: e.target.value })}
-                            />
-                            <button
-                              style={styles.btnTagAction}
-                              onClick={() => handleCategorizeReport(rep.id, tagInputMap[`cat_\${rep.id}`])}
-                            >
-                              Categorize Ticket
-                            </button>
-                          </div>
-
-                          <div style={styles.mapContainerBox}>
-                            <span style={styles.fieldLabel}>LOCATION MAP PREVIEW (Click to open Google Maps):</span>
-                            <div 
-                              style={styles.gpsMapBoxInteractive} 
-                              onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=\${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}`, '_blank')}
-                              title="Click to open in Google Maps"
-                            >
-                              <iframe
-                                title="Report GPS Location"
-                                width="100%"
-                                height="130"
-                                frameBorder="0"
-                                scrolling="no"
-                                src={`https://maps.google.com/maps?q=\${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}&t=m&z=16&ie=UTF8&iwloc=&output=embed`}
-                                style={{ borderRadius: '6px', pointerEvents: 'none' }}
-                              ></iframe>
-                              <div style={styles.mapOverlayBadge}>Open in Google Maps &rarr;</div>
-                            </div>
-                          </div>
-
-                          {photoList.length > 0 && (
-                            <div style={styles.detailSectionPlain}>
-                              <span style={styles.fieldLabel}>ATTACHED EVIDENCE PHOTOS ({photoList.length}):</span>
-                              <div style={styles.photoGalleryGrid}>
-                                {photoList.map((src, idx) => (
-                                  <img key={idx} src={src} alt="Evidence" style={styles.thumbImgFixed} onClick={() => setInspectImage(src)} />
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                      {rep.assigned_responder && (
+                        <div style={styles.assignedBadgeBox}>
+                          Assigned Unit: <strong>{rep.assigned_responder}</strong>
                         </div>
                       )}
-                    </div>
-                  );
-                })
-              )}
-
-              <div style={styles.sectionSubTitle}>CATEGORIZED INDIVIDUAL TICKETS ({categorizedReports.length})</div>
-              {categorizedReports.length === 0 ? (
-                <div style={styles.emptyCard}>No categorized tickets yet. Assign a category to individual tickets above.</div>
-              ) : (
-                categorizedReports.map((rep) => {
-                  const submitter = getSubmitterInfo(rep, profiles);
-                  const isExpanded = expandedTicketId === rep.id;
-                  const photoList = parsePhotos(rep.proof_photos || rep.photos);
-                  const ticketNum = rep.id || rep.ticket_no || 'TKT-001';
-                  const title = rep.hazard_type || rep.category || 'Active Hazard';
-                  const ticketTitle = rep.description || 'Verified hazard entry.';
-
-                  return (
-                    <div key={rep.id} style={styles.itemCardAccordion} onClick={() => setExpandedTicketId(isExpanded ? null : rep.id)}>
-                      <div style={styles.cardHeaderRow}>
-                        <div style={styles.headerTitleGroup}>
-                          <span style={styles.ticketBadge}>{ticketNum}</span>
-                          <span style={styles.badgeTeal}>{rep.category}</span>
-                        </div>
-                        <span style={styles.userMetaText}>Device ID: {submitter.deviceId}</span>
-                      </div>
-
-                      <h4 style={styles.itemTitle}>{title}</h4>
-                      <p style={styles.ticketSubTitleText}>"{ticketTitle}"</p>
 
                       {!isExpanded ? (
-                        <div style={styles.expandHintText}>Click to expand, re-categorize or resolve &rarr;</div>
+                        <div style={styles.expandHintText}>Click to expand full details & dispatch controls &rarr;</div>
                       ) : (
                         <div style={styles.accordionDetailBox} onClick={(e) => e.stopPropagation()}>
                           <div style={styles.detailGridPlain}>
+                            <div style={styles.detailRowPlain}>
+                              <span style={styles.fieldLabel}>HAZARD / ISSUE TYPE:</span>
+                              <span style={styles.fieldValText}>{rep.hazard_type || rep.category}</span>
+                            </div>
                             <div style={styles.detailRowPlain}>
                               <span style={styles.fieldLabel}>SEVERITY URGENCY LEVEL:</span>
                               <span style={getSeverityBadgeStyle(rep.severity)}>{(rep.severity || 'HIGH').toUpperCase()}</span>
@@ -1234,27 +1322,12 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                             </div>
                           </div>
 
-                          <div style={styles.tagFormRow}>
-                            <input
-                              type="text"
-                              style={styles.textInputCompact}
-                              placeholder={rep.category || "Change category..."}
-                              value={tagInputMap[`cat_\${rep.id}`] || ''}
-                              onChange={(e) => setTagInputMap({ ...tagInputMap, [`cat_\${rep.id}`]: e.target.value })}
-                            />
-                            <button
-                              style={styles.btnTagAction}
-                              onClick={() => handleCategorizeReport(rep.id, tagInputMap[`cat_\${rep.id}`])}
-                            >
-                              Update Category
-                            </button>
-                          </div>
-
+                          {/* Google Maps Preview */}
                           <div style={styles.mapContainerBox}>
                             <span style={styles.fieldLabel}>LOCATION MAP PREVIEW (Click to open Google Maps):</span>
                             <div 
                               style={styles.gpsMapBoxInteractive} 
-                              onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=\${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}`, '_blank')}
+                              onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}`, '_blank')}
                               title="Click to open in Google Maps"
                             >
                               <iframe
@@ -1263,11 +1336,16 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                                 height="130"
                                 frameBorder="0"
                                 scrolling="no"
-                                src={`https://maps.google.com/maps?q=\${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}&t=m&z=16&ie=UTF8&iwloc=&output=embed`}
+                                src={`https://maps.google.com/maps?q=${encodeURIComponent(rep.coordinates || rep.location || '13.7565,121.0583')}&t=m&z=16&ie=UTF8&iwloc=&output=embed`}
                                 style={{ borderRadius: '6px', pointerEvents: 'none' }}
                               ></iframe>
                               <div style={styles.mapOverlayBadge}>Open in Google Maps &rarr;</div>
                             </div>
+                          </div>
+
+                          <div style={styles.detailSectionPlain}>
+                            <span style={styles.fieldLabel}>SITUATION DESCRIPTION / REMARKS:</span>
+                            <p style={styles.descTextPlain}>{rep.description || 'No descriptive details provided by submitter.'}</p>
                           </div>
 
                           {photoList.length > 0 && (
@@ -1275,17 +1353,71 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                               <span style={styles.fieldLabel}>ATTACHED EVIDENCE PHOTOS ({photoList.length}):</span>
                               <div style={styles.photoGalleryGrid}>
                                 {photoList.map((src, idx) => (
-                                  <img key={idx} src={src} alt="Evidence" style={styles.thumbImgFixed} onClick={() => setInspectImage(src)} />
+                                  <img
+                                    key={idx}
+                                    src={src}
+                                    alt={`Evidence ${idx + 1}`}
+                                    style={styles.thumbImgFixed}
+                                    onClick={() => setInspectImage(src)}
+                                  />
                                 ))}
                               </div>
                             </div>
                           )}
+
+                          {/* 3-Step Lifecycle Tracker Bar */}
+                          <div style={styles.trackerBar}>
+                            <span style={rep.status === 'DISPATCHED' ? styles.stepActive : styles.stepDone}>1. Dispatched</span>
+                            <span style={rep.status === 'IN_PROGRESS' ? styles.stepActive : styles.stepDone}>2. In Progress</span>
+                            <span style={rep.status === 'RESOLVED' ? styles.stepActive : styles.stepDone}>3. Resolved</span>
+                          </div>
+
+                          {/* Deploy Responder Inline Dropdown */}
+                          <div style={styles.dispatchInlineRow}>
+                            <select
+                              style={styles.selectInputCompact}
+                              value={selectedResponderTeam}
+                              onChange={(e) => setSelectedResponderTeam(e.target.value)}
+                            >
+                              {responderTeams.map((team) => (
+                                <option key={team.id} value={team.name}>{team.name}</option>
+                              ))}
+                            </select>
+                            <button
+                              style={styles.btnDispatch}
+                              onClick={() => handleAssignResponder(rep.id)}
+                            >
+                              Deploy Unit
+                            </button>
+                          </div>
+
+                          {/* Mandatory Completion Photo Upload for Resolution */}
+                          <div style={styles.proofUploadBox}>
+                            <span style={styles.fieldLabel}>COMPLETION PHOTO PROOF (Required for Mark Resolved *):</span>
+                            <label style={styles.photoUploadDropzoneCompact}>
+                              <span style={styles.uploadTextCompact}>
+                                {tagInputMap[`photo_${rep.id}`] ? '✓ Photo Proof Attached' : '+ Select On-Site Completion Photo'}
+                              </span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                style={{ display: 'none' }}
+                                onChange={(e) => handlePhotoUpload(e, (b64) => setTagInputMap({ ...tagInputMap, [`photo_${rep.id}`]: b64 }))}
+                              />
+                            </label>
+                          </div>
 
                           <div style={styles.actionRow}>
                             <button
+                              style={styles.btnInvestigate}
+                              onClick={() => handleUpdateReportStatus(rep.id, 'IN_PROGRESS')}
+                            >
+                              In Progress
+                            </button>
+                            <button
                               style={styles.btnResolve}
                               onClick={() => {
-                                const photoProof = tagInputMap[`photo_\${rep.id}`];
+                                const photoProof = tagInputMap[`photo_${rep.id}`];
                                 if (!photoProof) {
                                   return alert('Mandatory Completion Photo Proof Required!\nPlease attach an on-site completion photo proof before marking this report as RESOLVED.');
                                 }
@@ -1304,16 +1436,17 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
             </div>
           )}
 
+          {/* Sub-Tab 2: Category Bulk Broadcast */}
           {activeSubTab === 'BULK' && (
             <div style={styles.sectionStack}>
               <div style={styles.bulkBoxCardCenter}>
                 <h4 style={styles.bulkFormTitle}>Category Bulk Operations & Broadcast</h4>
-                <p style={styles.bulkFormSub}>Apply operational progress updates across all tickets assigned to a specific category simultaneously.</p>
+                <p style={styles.bulkFormSub}>Apply operational progress updates, deploy responder units & broadcast advisories across all reports in a category group simultaneously.</p>
 
-                <label style={styles.fieldLabel}>1. SELECT CATEGORY GROUP:</label>
+                <label style={styles.fieldLabel}>1. SELECT ACTIVE CATEGORY GROUP:</label>
                 {activeCategoriesList.length === 0 ? (
                   <div style={styles.noticeTextSmall}>
-                    No categories assigned yet. Categorize individual tickets first to enable bulk operations.
+                    No active categories tagged yet. Tag active reports in the Active Tracker to enable bulk updates.
                   </div>
                 ) : (
                   <select
@@ -1321,32 +1454,32 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                     value={selectedBulkCategory}
                     onChange={(e) => setSelectedBulkCategory(e.target.value)}
                   >
-                    <option value="">-- Choose Category --</option>
+                    <option value="">-- Choose Category Group --</option>
                     {activeCategoriesList.map((cat) => {
-                      const count = categorizedReports.filter(
-                        (r) => (r.category || '').toUpperCase() === cat.toUpperCase()
+                      const count = activeTrackerReports.filter(
+                        (r) => (r.category || r.hazard_type || '').toUpperCase() === cat.toUpperCase()
                       ).length;
                       return (
                         <option key={cat} value={cat}>
-                          {cat} ({count} tickets)
+                          {cat} ({count} active reports)
                         </option>
                       );
                     })}
                   </select>
                 )}
 
-                <label style={styles.fieldLabel}>2. SET STATUS:</label>
+                <label style={styles.fieldLabel}>2. SET PROGRESS STAGE FOR GROUP:</label>
                 <select
                   style={styles.selectInput}
                   value={bulkStatus}
                   onChange={(e) => setBulkStatus(e.target.value)}
                 >
-                  <option value="APPROVED">Stage 1: Approved</option>
+                  <option value="DISPATCHED">Stage 1: Dispatched</option>
                   <option value="IN_PROGRESS">Stage 2: In Progress</option>
                   <option value="RESOLVED">Stage 3: Resolved & Cleared</option>
                 </select>
 
-                <label style={styles.fieldLabel}>3. ASSIGN RESPONSE TEAM:</label>
+                <label style={styles.fieldLabel}>3. ASSIGN RESPONSE TEAM TO GROUP:</label>
                 <select
                   style={styles.selectInput}
                   value={bulkTeam}
@@ -1356,6 +1489,50 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                     <option key={team.id} value={team.name}>{team.name}</option>
                   ))}
                 </select>
+
+                <div style={styles.labelRowBetween}>
+                  <label style={styles.fieldLabel}>4. BROADCAST DIRECTIVE NOTICE:</label>
+                  <button
+                    type="button"
+                    style={styles.btnAutoNotice}
+                    onClick={() => {
+                      if (selectedBulkCategory && bulkStatus && bulkTeam) {
+                        const matchingCount = activeTrackerReports.filter(
+                          (r) => (r.category || r.hazard_type || '').toUpperCase() === selectedBulkCategory.toUpperCase()
+                        ).length;
+                        const autoText = generateAutomatedDirectiveNotice(selectedBulkCategory, bulkStatus, bulkTeam, matchingCount);
+                        setBulkNotice(autoText);
+                      }
+                    }}
+                  >
+                    Auto-Generate Direct Notice
+                  </button>
+                </div>
+
+                <textarea
+                  style={styles.textareaInput}
+                  rows="3"
+                  placeholder="e.g. CDRRMO crew active on location..."
+                  value={bulkNotice}
+                  onChange={(e) => setBulkNotice(e.target.value)}
+                ></textarea>
+
+                <label style={styles.fieldLabel}>5. ATTACH ON-SITE PROGRESS PHOTO:</label>
+                <label style={styles.photoUploadDropzone}>
+                  <span style={styles.uploadText}>{bulkPhoto ? '✓ Progress Photo Attached' : '+ Upload Progress Photo'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => handlePhotoUpload(e, (b64) => setBulkPhoto(b64))}
+                  />
+                </label>
+
+                {bulkPhoto && (
+                  <div style={styles.previewPhotoBox}>
+                    <img src={bulkPhoto} alt="Bulk Preview" style={styles.previewThumbImg} />
+                  </div>
+                )}
 
                 <button
                   style={styles.btnBulkSubmit}
@@ -1370,7 +1547,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
         </div>
       )}
 
-      {/* MODULE 3: USER MANAGEMENT */}
+      {/* MODULE 3: USER MANAGEMENT & MODERATION */}
       {currentView === 'USER_HANDLING' && (
         <div style={styles.sectionStack}>
           <div style={styles.subTabContainer}>
@@ -1394,6 +1571,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
             </button>
           </div>
 
+          {/* Sub-Tab 1: Verified Citizens */}
           {userSubTab === 'VERIFIED' && (
             <div style={styles.sectionStack}>
               {verifiedCitizens.length === 0 ? (
@@ -1412,8 +1590,8 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                       </div>
                       <div style={styles.userRightActionRow}>
                         <span style={styles.badgeGreen}>SMS ELIGIBLE</span>
-                        <button style={styles.btnWarn} onClick={() => handleUpdateUserStatus(user.device_id, 'PENALIZED')}>Penalty</button>
-                        <button style={styles.btnBan} onClick={() => handleUpdateUserStatus(user.device_id, 'BANNED')}>Ban</button>
+                        <button style={styles.btnWarn} onClick={() => handleUpdateUserStatus(user.device_id, 'PENALIZED', 'Warning issued')}>Penalty</button>
+                        <button style={styles.btnBan} onClick={() => handleUpdateUserStatus(user.device_id, 'BANNED', 'Policy violation')}>Ban</button>
                       </div>
                     </div>
                   );
@@ -1422,6 +1600,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
             </div>
           )}
 
+          {/* Sub-Tab 2: Guest Devices */}
           {userSubTab === 'GUEST' && (
             <div style={styles.sectionStack}>
               {guestUsers.length === 0 ? (
@@ -1439,8 +1618,8 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                         </div>
                       </div>
                       <div style={styles.userRightActionRow}>
-                        <button style={styles.btnWarn} onClick={() => handleUpdateUserStatus(user.device_id, 'PENALIZED')}>Penalty</button>
-                        <button style={styles.btnBan} onClick={() => handleUpdateUserStatus(user.device_id, 'BANNED')}>Ban</button>
+                        <button style={styles.btnWarn} onClick={() => handleUpdateUserStatus(user.device_id, 'PENALIZED', 'Spam report penalty')}>Penalty</button>
+                        <button style={styles.btnBan} onClick={() => handleUpdateUserStatus(user.device_id, 'BANNED', 'Abuse ban')}>Ban</button>
                       </div>
                     </div>
                   );
@@ -1449,6 +1628,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
             </div>
           )}
 
+          {/* Sub-Tab 3: Verification Queue */}
           {userSubTab === 'REQUESTS' && (
             <div style={styles.sectionStack}>
               {pendingVerificationRequests.length === 0 ? (
@@ -1487,7 +1667,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                       </button>
                       <button
                         style={styles.btnReject}
-                        onClick={() => handleUpdateUserStatus(req.device_id, 'REJECTED')}
+                        onClick={() => handleUpdateUserStatus(req.device_id, 'REJECTED', 'ID Proof rejected')}
                       >
                         Reject Verification
                       </button>
@@ -1518,8 +1698,10 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
             </button>
           </div>
 
+          {/* PART 1: Selection Lists */}
           {memoSubTab === 'PART1' && (
             <div style={styles.sectionStack}>
+              {/* Section A: Categorized Groups */}
               <div style={styles.sectionSubTitle}>CATEGORIZED INCIDENT GROUPS ({categoryGroups.length})</div>
               {categoryGroups.length === 0 ? (
                 <div style={styles.emptyCard}>No category groups created yet. Tag reports in Active Operations to form groups.</div>
@@ -1561,29 +1743,27 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                 })
               )}
 
+              {/* Section B: Uncategorized Individual Tickets */}
               <div style={styles.sectionSubTitle}>UNCATEGORIZED INDIVIDUAL TICKETS ({uncategorizedReports.length})</div>
               {uncategorizedReports.length === 0 ? (
                 <div style={styles.emptyCard}>All incident reports have been categorized into groups.</div>
               ) : (
                 uncategorizedReports.map((rep) => {
                   const isExpanded = expandedTicketId === rep.id;
-                  const ticketNum = rep.id || rep.ticket_no || 'TKT-001';
-                  const title = rep.hazard_type || rep.category || 'Hazard Incident';
-                  const ticketTitle = rep.description || 'Verified hazard entry.';
-
+                  const photoList = parsePhotos(rep.proof_photos || rep.photos);
                   return (
                     <div key={rep.id} style={styles.itemCardAccordion} onClick={() => setExpandedTicketId(isExpanded ? null : rep.id)}>
                       <div style={styles.cardHeaderRow}>
-                        <span style={styles.ticketBadge}>{ticketNum}</span>
+                        <span style={styles.ticketBadge}>{rep.id || rep.ticket_no}</span>
                         <span style={styles.badgeOrange}>{rep.status}</span>
                       </div>
 
-                      <h4 style={styles.itemTitle}>{title}</h4>
-                      <p style={styles.ticketSubTitleText}>"{ticketTitle}"</p>
+                      <h4 style={styles.itemTitle}>{rep.hazard_type || rep.category}</h4>
                       <p style={styles.itemMeta}>Location: {rep.location}</p>
 
                       {isExpanded && (
                         <div style={styles.accordionDetailBox} onClick={(e) => e.stopPropagation()}>
+                          <p style={styles.memoDescText}>"{rep.description || 'Verified hazard entry.'}"</p>
                           <div style={styles.memoActionBox}>
                             <button
                               style={styles.btnMakeMemoPrimary}
@@ -1593,7 +1773,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                                 setMemoSubTab('PART2');
                               }}
                             >
-                              Make a Memo for #{ticketNum}
+                              Make a Memo for #{rep.id || rep.ticket_no}
                             </button>
                           </div>
                         </div>
@@ -1605,6 +1785,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
             </div>
           )}
 
+          {/* PART 2: Memo Document Preview & Export */}
           {memoSubTab === 'PART2' && (
             <div>
               {(selectedMemoCategoryGroup || selectedMemoReport) ? (
@@ -1619,6 +1800,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                     </div>
                   </div>
 
+                  {/* Printable Memorandum Paper */}
                   <div style={styles.officialMemoPaper}>
                     <div style={styles.memoHeaderSeal}>
                       <div style={styles.memoRepTitle}>REPUBLIC OF THE PHILIPPINES</div>
@@ -1660,6 +1842,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                       )}
                     </div>
 
+                    {/* Section III: Exhibit Photos */}
                     <div style={styles.memoSectionHeading}>III. VERIFIED CITIZEN EVIDENCE & PHOTOGRAPHIC PROOF ATTACHMENTS</div>
                     {((selectedMemoCategoryGroup && selectedMemoCategoryGroup.photos.length > 0) || (selectedMemoReport && parsePhotos(selectedMemoReport.proof_photos || selectedMemoReport.photos).length > 0)) ? (
                       <div style={styles.memoPhotoGrid}>
@@ -1703,64 +1886,161 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
         </div>
       )}
 
-      {/* MODULE 5: ARCHIVE */}
+      {/* MODULE 5: RESOLVED INCIDENT ARCHIVE */}
       {currentView === 'RESOLVED_ARCHIVE' && (
         <div style={styles.sectionStack}>
           <div style={styles.subTabContainer}>
             <button
-              style={archiveSubTab === 'RESOLVED' ? styles.subTabBtnActive : styles.subTabBtnInactive}
-              onClick={() => setArchiveSubTab('RESOLVED')}
+              style={resolvedSubTab === 'GROUPS' ? styles.subTabBtnActive : styles.subTabBtnInactive}
+              onClick={() => setResolvedSubTab('GROUPS')}
             >
-              Resolved Individual Incidents ({resolvedReports.length})
+              Categorized Resolved Groups ({resolvedCategoryGroups.length})
             </button>
             <button
-              style={archiveSubTab === 'REJECTED' ? styles.subTabBtnActive : styles.subTabBtnInactive}
-              onClick={() => setArchiveSubTab('REJECTED')}
+              style={resolvedSubTab === 'UNCATEGORIZED' ? styles.subTabBtnActive : styles.subTabBtnInactive}
+              onClick={() => setResolvedSubTab('UNCATEGORIZED')}
             >
-              Rejected Archive Logs ({rejectedDataReports.length})
+              Uncategorized Resolved Tickets ({resolvedUncategorizedReports.length})
             </button>
           </div>
 
-          {archiveSubTab === 'RESOLVED' && (
+          {/* Sub-Tab 1: Categorized Resolved Groups */}
+          {resolvedSubTab === 'GROUPS' && (
             <div style={styles.sectionStack}>
-              {resolvedReports.length === 0 ? (
-                <div style={styles.emptyCard}>No resolved incident archive records found.</div>
+              {resolvedCategoryGroups.length === 0 ? (
+                <div style={styles.emptyCard}>No categorized resolved hazard groups yet.</div>
               ) : (
-                resolvedReports.map((rep) => {
+                resolvedCategoryGroups.map((group) => {
+                  const isExpanded = expandedGroupId === group.id;
+                  return (
+                    <div key={group.id} style={styles.itemCardAccordion} onClick={() => setExpandedGroupId(isExpanded ? null : group.id)}>
+                      <div style={styles.cardHeaderRow}>
+                        <span style={styles.ticketBadge}>{group.category.toUpperCase()} GROUP</span>
+                        <span style={styles.badgeGreen}>✓ {group.reports.length} Resolved Tickets</span>
+                      </div>
+
+                      <p style={styles.itemMeta}>Locations Sector: {group.locations.join(', ') || 'Batangas City'}</p>
+
+                      {!isExpanded ? (
+                        <div style={styles.expandHintText}>Click to expand compiled resolved tickets & photo proof &rarr;</div>
+                      ) : (
+                        <div style={styles.accordionDetailBox} onClick={(e) => e.stopPropagation()}>
+                          <div style={styles.subTitleSmall}>RESOLVED TICKETS IN THIS CATEGORY:</div>
+                          {group.reports.map((r, idx) => {
+                            const submitter = getSubmitterInfo(r, profiles);
+                            const rPhotos = parsePhotos(r.proof_photos || r.photos);
+                            return (
+                              <div key={r.id} style={styles.resolvedSubTicketCard}>
+                                <div style={styles.cardHeaderRow}>
+                                  <span style={styles.badgeTeal}>{group.category.toUpperCase()} #{idx + 1}</span>
+                                  <span style={styles.ticketBadge}>#{r.id || r.ticket_no}</span>
+                                </div>
+                                <h4 style={styles.itemTitle}>{r.hazard_type || r.category}</h4>
+                                <p style={styles.itemMeta}>Location: {r.location}</p>
+
+                                <div style={styles.detailGridPlain}>
+                                  <div style={styles.detailRowPlain}>
+                                    <span style={styles.fieldLabel}>SUBMITTER IDENTIFICATION:</span>
+                                    <span style={styles.fieldValText}>Device ID: {submitter.deviceId}</span>
+                                  </div>
+                                  <div style={styles.detailRowPlain}>
+                                    <span style={styles.fieldLabel}>SITUATION DESCRIPTION:</span>
+                                    <span style={styles.fieldValText}>{r.description || 'Verified hazard entry.'}</span>
+                                  </div>
+                                  {r.assigned_responder && (
+                                    <div style={styles.detailRowPlain}>
+                                      <span style={styles.fieldLabel}>RESOLVING RESPONDER UNIT:</span>
+                                      <span style={styles.fieldValText}>{r.assigned_responder}</span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {rPhotos.length > 0 && (
+                                  <div style={styles.detailSectionPlain}>
+                                    <span style={styles.fieldLabel}>INITIAL EVIDENCE PHOTOS ({rPhotos.length}):</span>
+                                    <div style={styles.photoGalleryGrid}>
+                                      {rPhotos.map((src, i) => (
+                                        <img key={i} src={src} alt="Initial Evidence" style={styles.thumbImgFixed} onClick={() => setInspectImage(src)} />
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {r.progress_photo && (
+                                  <div style={styles.detailSectionPlain}>
+                                    <span style={styles.fieldLabel}>✓ ON-SITE RESOLUTION PHOTO PROOF:</span>
+                                    <div style={styles.photoGalleryGrid}>
+                                      <img src={r.progress_photo} alt="Resolution Proof" style={styles.thumbImgFixed} onClick={() => setInspectImage(r.progress_photo)} />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* Sub-Tab 2: Uncategorized Resolved Tickets */}
+          {resolvedSubTab === 'UNCATEGORIZED' && (
+            <div style={styles.sectionStack}>
+              {resolvedUncategorizedReports.length === 0 ? (
+                <div style={styles.emptyCard}>No uncategorized resolved tickets found.</div>
+              ) : (
+                resolvedUncategorizedReports.map((rep) => {
                   const isExpanded = expandedTicketId === rep.id;
                   const photoList = parsePhotos(rep.proof_photos || rep.photos);
                   const submitter = getSubmitterInfo(rep, profiles);
-                  const ticketNum = rep.id || rep.ticket_no || 'TKT-001';
-                  const title = rep.hazard_type || rep.category || 'Resolved Incident';
-                  const ticketTitle = rep.description || 'Verified hazard entry.';
-
                   return (
                     <div key={rep.id} style={styles.itemCardAccordion} onClick={() => setExpandedTicketId(isExpanded ? null : rep.id)}>
                       <div style={styles.cardHeaderRow}>
                         <div style={styles.headerTitleGroup}>
-                          <span style={styles.ticketBadge}>{ticketNum}</span>
+                          <span style={styles.ticketBadge}>{rep.id || rep.ticket_no}</span>
                           <span style={styles.badgeGreen}>RESOLVED</span>
                         </div>
                         <span style={styles.userMetaText}>Device ID: {submitter.deviceId}</span>
                       </div>
 
-                      <h4 style={styles.itemTitle}>{title}</h4>
-                      <p style={styles.ticketSubTitleText}>"{ticketTitle}"</p>
+                      <h4 style={styles.itemTitle}>{rep.hazard_type || rep.category || 'Hazard Incident Report'}</h4>
 
                       {!isExpanded ? (
-                        <div style={styles.expandHintText}>Click to expand resolved details & photo proof &rarr;</div>
+                        <div style={styles.expandHintText}>Click to expand resolved ticket details & photo proof &rarr;</div>
                       ) : (
                         <div style={styles.accordionDetailBox} onClick={(e) => e.stopPropagation()}>
                           <div style={styles.detailGridPlain}>
                             <div style={styles.detailRowPlain}>
+                              <span style={styles.fieldLabel}>HAZARD / ISSUE TYPE:</span>
+                              <span style={styles.fieldValText}>{rep.hazard_type || rep.category}</span>
+                            </div>
+                            <div style={styles.detailRowPlain}>
                               <span style={styles.fieldLabel}>LOCATION LANDMARK:</span>
                               <span style={styles.fieldValText}>{rep.location}</span>
                             </div>
+                            <div style={styles.detailRowPlain}>
+                              <span style={styles.fieldLabel}>SUBMITTER IDENTIFICATION:</span>
+                              <span style={styles.fieldValText}>Device ID: {submitter.deviceId}</span>
+                            </div>
+                            {rep.assigned_responder && (
+                              <div style={styles.detailRowPlain}>
+                                <span style={styles.fieldLabel}>RESOLVED BY UNIT:</span>
+                                <span style={styles.fieldValText}>{rep.assigned_responder}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div style={styles.detailSectionPlain}>
+                            <span style={styles.fieldLabel}>SITUATION DESCRIPTION:</span>
+                            <p style={styles.descTextPlain}>{rep.description || 'No descriptive details provided.'}</p>
                           </div>
 
                           {photoList.length > 0 && (
                             <div style={styles.detailSectionPlain}>
-                              <span style={styles.fieldLabel}>ATTACHED EVIDENCE PHOTOS:</span>
+                              <span style={styles.fieldLabel}>ATTACHED EVIDENCE PHOTOS ({photoList.length}):</span>
                               <div style={styles.photoGalleryGrid}>
                                 {photoList.map((src, idx) => (
                                   <img key={idx} src={src} alt="Evidence" style={styles.thumbImgFixed} onClick={() => setInspectImage(src)} />
@@ -1771,7 +2051,7 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
 
                           {rep.progress_photo && (
                             <div style={styles.detailSectionPlain}>
-                              <span style={styles.fieldLabel}>✓ RESOLUTION PHOTO PROOF:</span>
+                              <span style={styles.fieldLabel}>✓ ON-SITE RESOLUTION PHOTO PROOF:</span>
                               <div style={styles.photoGalleryGrid}>
                                 <img src={rep.progress_photo} alt="Resolution Proof" style={styles.thumbImgFixed} onClick={() => setInspectImage(rep.progress_photo)} />
                               </div>
@@ -1782,32 +2062,6 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
                     </div>
                   );
                 })
-              )}
-            </div>
-          )}
-
-          {archiveSubTab === 'REJECTED' && (
-            <div style={styles.sectionStack}>
-              <div style={styles.archiveHeaderRow}>
-                <span style={styles.archiveNoticeText}>Archived History of Rejected Incident Records</span>
-                <button style={styles.btnPurgeAll} onClick={handlePurgeAllRejectedData}>
-                  Purge All Rejected Data
-                </button>
-              </div>
-
-              {rejectedDataReports.length === 0 ? (
-                <div style={styles.emptyCard}>No rejected incident records found in archive.</div>
-              ) : (
-                rejectedDataReports.map((rep) => (
-                  <div key={rep.id} style={styles.itemCardAccordion}>
-                    <div style={styles.cardHeaderRow}>
-                      <span style={styles.ticketBadge}>{rep.id || 'TKT'}</span>
-                      <span style={styles.badgeRed}>REJECTED</span>
-                    </div>
-                    <h4 style={styles.itemTitle}>{rep.hazard_type || rep.category || 'Rejected Incident'}</h4>
-                    <p style={styles.itemMeta}>Location: {rep.location}</p>
-                  </div>
-                ))
               )}
             </div>
           )}
@@ -1828,153 +2082,173 @@ Project AGAP Operations Portal                  Signature & Date / Time Received
 }
 
 const styles = {
-  container: { backgroundColor: '#F8FAFC', minHeight: '100vh', padding: '16px', fontFamily: "'Plus Jakarta Sans', sans-serif" },
-  navHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0F766E', padding: '12px 16px', borderRadius: '10px', color: '#FFFFFF', marginBottom: '16px' },
-  backBtn: { backgroundColor: '#1E3A8A', color: '#FFFFFF', border: 'none', padding: '8px 14px', borderRadius: '8px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center' },
-  headerTitle: { fontSize: '15px', fontWeight: '700', margin: 0, textAlign: 'right' },
-  headerSub: { fontSize: '10px', color: '#CCFBF1', textAlign: 'right' },
-  dashboardContainer: { display: 'flex', flexDirection: 'column', gap: '14px' },
-  welcomeBanner: { backgroundColor: '#0F766E', color: '#FFFFFF', padding: '14px', borderRadius: '10px' },
-  welcomeTag: { fontSize: '9px', fontWeight: '700', letterSpacing: '1px', opacity: 0.8, marginBottom: '2px' },
-  welcomeTitle: { fontSize: '18px', fontWeight: '700', margin: '2px 0' },
-  welcomeSubtext: { fontSize: '11px', opacity: 0.9, margin: 0 },
-  smsStatusCard: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '10px', padding: '12px' },
-  smsStatusHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' },
-  smsStatusTitle: { fontSize: '10px', fontWeight: '700', color: '#0F766E' },
-  smsBadgeActive: { backgroundColor: '#DCFCE7', color: '#15803D', fontSize: '9px', fontWeight: '700', padding: '2px 8px', borderRadius: '12px' },
-  smsStatusSub: { fontSize: '10px', color: '#475569', margin: '2px 0 6px 0', lineHeight: '1.4' },
-  smsLogBox: { backgroundColor: '#F1F5F9', borderRadius: '6px', padding: '8px', marginTop: '6px' },
-  smsLogLabel: { fontSize: '9px', fontWeight: '700', color: '#334155', marginBottom: '4px' },
-  smsLogRow: { fontSize: '9px', display: 'flex', gap: '6px', marginBottom: '2px' },
-  smsLogTime: { color: '#64748B', fontWeight: '700' },
-  smsLogSuccess: { color: '#15803D', fontWeight: '700' },
-  smsLogSkipped: { color: '#D97706', fontWeight: '700' },
-  moduleSectionTitle: { fontSize: '11px', fontWeight: '700', color: '#475569', letterSpacing: '0.8px', marginTop: '4px' },
-  tableCardContainer: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '10px', overflow: 'hidden' },
-  tableRow: { display: 'flex', alignItems: 'center', padding: '12px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer' },
-  tableRowLast: { display: 'flex', alignItems: 'center', padding: '12px', cursor: 'pointer' },
-  tableColIcon: { marginRight: '12px' },
-  iconBoxAmber: { width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#FEF3C7', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  iconBoxTeal: { width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#CCFBF1', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  iconBoxPurple: { width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#F3E8FF', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  iconBoxEmerald: { width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#DCFCE7', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  iconBoxSlate: { width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  container: { backgroundColor: '#F8FAFC', minHeight: '100vh', padding: '16px', fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
+  navHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0F766E', padding: '14px 18px', borderRadius: '12px', color: '#FFFFFF', marginBottom: '16px', boxShadow: '0 2px 4px rgba(0,0,0,0.06)' },
+  backBtn: { backgroundColor: '#1E3A8A', color: '#FFFFFF', border: 'none', padding: '8px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' },
+  headerTitle: { fontSize: '16px', fontWeight: '700', margin: 0, textAlign: 'right', letterSpacing: '-0.2px' },
+  headerSub: { fontSize: '11px', color: '#CCFBF1', textAlign: 'right', fontWeight: '500', marginTop: '2px' },
+  dashboardContainer: { display: 'flex', flexDirection: 'column', gap: '16px' },
+  welcomeBanner: { backgroundColor: '#0F766E', color: '#FFFFFF', padding: '18px', borderRadius: '12px', boxShadow: '0 2px 4px rgba(15,118,110,0.15)' },
+  welcomeTag: { fontSize: '10px', fontWeight: '700', letterSpacing: '1px', opacity: 0.9, marginBottom: '4px', textTransform: 'uppercase' },
+  welcomeTitle: { fontSize: '20px', fontWeight: '700', margin: '4px 0', letterSpacing: '-0.3px' },
+  welcomeSubtext: { fontSize: '13px', opacity: 0.9, margin: 0, lineHeight: '1.5' },
+  smsStatusCard: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' },
+  smsStatusHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' },
+  smsStatusTitle: { fontSize: '12px', fontWeight: '700', color: '#0F766E', letterSpacing: '0.5px', textTransform: 'uppercase' },
+  smsBadgeActive: { backgroundColor: '#DCFCE7', color: '#15803D', fontSize: '10px', fontWeight: '700', padding: '3px 10px', borderRadius: '12px', textTransform: 'uppercase' },
+  smsStatusSub: { fontSize: '12px', color: '#475569', margin: '4px 0 8px 0', lineHeight: '1.5' },
+  smsLogBox: { backgroundColor: '#F8FAFC', borderRadius: '8px', padding: '10px 12px', marginTop: '8px', border: '1px solid #E2E8F0' },
+  smsLogLabel: { fontSize: '11px', fontWeight: '700', color: '#334155', marginBottom: '6px', letterSpacing: '0.3px' },
+  smsLogRow: { fontSize: '11px', display: 'flex', gap: '8px', marginBottom: '4px', lineHeight: '1.4' },
+  smsLogTime: { color: '#64748B', fontWeight: '600' },
+  smsLogSuccess: { color: '#15803D', fontWeight: '600' },
+  smsLogSkipped: { color: '#D97706', fontWeight: '600' },
+  moduleSectionTitle: { fontSize: '12px', fontWeight: '700', color: '#475569', letterSpacing: '0.8px', marginTop: '6px', textTransform: 'uppercase' },
+  tableCardContainer: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' },
+  tableRow: { display: 'flex', alignItems: 'center', padding: '14px 16px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', transition: 'background-color 0.2s' },
+  tableRowLast: { display: 'flex', alignItems: 'center', padding: '14px 16px', cursor: 'pointer', transition: 'background-color 0.2s' },
+  tableColIcon: { marginRight: '14px' },
+  iconBoxAmber: { width: '40px', height: '40px', borderRadius: '10px', backgroundColor: '#FEF3C7', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  iconBoxTeal: { width: '40px', height: '40px', borderRadius: '10px', backgroundColor: '#CCFBF1', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  iconBoxPurple: { width: '40px', height: '40px', borderRadius: '10px', backgroundColor: '#F3E8FF', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  iconBoxEmerald: { width: '40px', height: '40px', borderRadius: '10px', backgroundColor: '#DCFCE7', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  iconBoxSlate: { width: '40px', height: '40px', borderRadius: '10px', backgroundColor: '#F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   tableColContent: { flex: 1 },
-  tableTitle: { fontSize: '13px', fontWeight: '700', color: '#0F172A' },
-  tableDesc: { fontSize: '10px', color: '#64748B', marginTop: '2px' },
-  tableColBadge: { marginLeft: '8px' },
-  dividerRow: { textAlign: 'center', margin: '10px 0 4px 0' },
-  dividerLabel: { fontSize: '9px', fontWeight: '700', color: '#64748B', letterSpacing: '1px' },
-  chartCard: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '10px', padding: '12px' },
-  chartControlRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' },
-  chartTitleTag: { fontSize: '10px', fontWeight: '700', color: '#0F766E' },
+  tableTitle: { fontSize: '14px', fontWeight: '700', color: '#0F172A', marginBottom: '2px' },
+  tableDesc: { fontSize: '12px', color: '#64748B', margin: 0, lineHeight: '1.4' },
+  tableColBadge: { marginLeft: '12px' },
+  dividerRow: { textAlign: 'center', margin: '12px 0 8px 0' },
+  dividerLabel: { fontSize: '11px', fontWeight: '700', color: '#64748B', letterSpacing: '1px', textTransform: 'uppercase' },
+  chartCard: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' },
+  chartControlRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' },
+  chartTitleTag: { fontSize: '12px', fontWeight: '700', color: '#0F766E', letterSpacing: '0.5px' },
   dateRangeGroup: { display: 'flex', alignItems: 'center', gap: '6px' },
-  datePickerInput: { padding: '4px 6px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '9px' },
-  toText: { fontSize: '9px', color: '#64748B' },
-  svgGraphBox: { padding: '8px 0', borderBottom: '1px solid #F1F5F9' },
-  chartLegendRow: { display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '8px', fontSize: '9px', fontWeight: '700' },
+  datePickerInput: { padding: '6px 10px', fontSize: '12px', border: '1px solid #CBD5E1', borderRadius: '6px', color: '#0F172A', backgroundColor: '#FFFFFF' },
+  toText: { fontSize: '11px', color: '#64748B', fontWeight: '500' },
+  svgGraphBox: { backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '10px', padding: '12px 8px', marginTop: '4px' },
+  chartLegendRow: { display: 'flex', justifyContent: 'center', gap: '20px', marginTop: '12px', fontSize: '11px', fontWeight: '600' },
   legendValid: { color: '#0F766E' },
   legendFalse: { color: '#DC2626' },
-  sectionStack: { display: 'flex', flexDirection: 'column', gap: '12px' },
-  subTabContainer: { display: 'flex', backgroundColor: '#E2E8F0', padding: '3px', borderRadius: '8px', gap: '4px' },
-  subTabBtnActive: { flex: 1, padding: '8px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '10px', fontWeight: '700', cursor: 'pointer', textAlign: 'center' },
-  subTabBtnInactive: { flex: 1, padding: '8px', backgroundColor: 'transparent', color: '#475569', border: 'none', borderRadius: '6px', fontSize: '10px', fontWeight: '700', cursor: 'pointer', textAlign: 'center' },
-  btnToggleFilter: { padding: '6px 12px', backgroundColor: '#E2E8F0', color: '#0F172A', border: '1px solid #CBD5E1', borderRadius: '6px', fontSize: '10px', fontWeight: '700', cursor: 'pointer' },
-  filterBarRow: { display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', padding: '8px', backgroundColor: '#F1F5F9', borderRadius: '6px' },
-  filterLabel: { fontSize: '9px', fontWeight: '700', color: '#475569', letterSpacing: '0.5px' },
-  filterBtnActive: { padding: '4px 10px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '4px', fontSize: '9.5px', fontWeight: '700', cursor: 'pointer' },
-  filterBtnInactive: { padding: '4px 10px', backgroundColor: '#FFFFFF', color: '#475569', border: '1px solid #CBD5E1', borderRadius: '4px', fontSize: '9.5px', fontWeight: '700', cursor: 'pointer' },
-  emptyCard: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '10px', padding: '20px', textAlign: 'center', fontSize: '11px', color: '#64748B' },
-  itemCardAccordion: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '10px', padding: '14px', cursor: 'pointer' },
+  sectionStack: { display: 'flex', flexDirection: 'column', gap: '14px' },
+  subTabContainer: { display: 'flex', backgroundColor: '#E2E8F0', borderRadius: '10px', padding: '4px', gap: '4px' },
+  subTabBtnActive: { flex: 1, padding: '10px 14px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s' },
+  subTabBtnInactive: { flex: 1, padding: '10px 14px', backgroundColor: 'transparent', color: '#475569', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s' },
+  btnToggleFilter: { padding: '8px 14px', backgroundColor: '#F1F5F9', color: '#0F172A', border: '1px solid #CBD5E1', borderRadius: '8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' },
+  filterBarRow: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', backgroundColor: '#FFFFFF', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E2E8F0' },
+  filterLabel: { fontSize: '11px', fontWeight: '700', color: '#64748B', letterSpacing: '0.5px' },
+  filterBtnActive: { padding: '5px 12px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
+  filterBtnInactive: { padding: '5px 12px', backgroundColor: '#F1F5F9', color: '#475569', border: '1px solid #CBD5E1', borderRadius: '6px', fontSize: '11px', fontWeight: '600', cursor: 'pointer' },
+  emptyCard: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '24px', textAlign: 'center', fontSize: '13px', color: '#64748B', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' },
+  itemCardAccordion: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '16px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', transition: 'all 0.2s' },
   cardHeaderRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
-  headerTitleGroup: { display: 'flex', alignItems: 'center', gap: '6px' },
-  ticketBadge: { fontSize: '11px', fontWeight: '700', color: '#0F766E', backgroundColor: '#CCFBF1', padding: '3px 8px', borderRadius: '6px', letterSpacing: '0.3px' },
-  badgeOrange: { backgroundColor: '#FEF3C7', color: '#D97706', fontSize: '10px', fontWeight: '700', padding: '3px 8px', borderRadius: '6px', letterSpacing: '0.3px' },
-  badgeRed: { backgroundColor: '#FEE2E2', color: '#DC2626', fontSize: '10px', fontWeight: '700', padding: '3px 8px', borderRadius: '6px', letterSpacing: '0.3px' },
-  badgeTeal: { backgroundColor: '#CCFBF1', color: '#0F766E', fontSize: '10px', fontWeight: '700', padding: '3px 8px', borderRadius: '6px', letterSpacing: '0.3px' },
-  badgeGreen: { backgroundColor: '#DCFCE7', color: '#15803D', fontSize: '10px', fontWeight: '700', padding: '3px 8px', borderRadius: '6px', letterSpacing: '0.3px' },
-  badgeYellow: { backgroundColor: '#FEF9C3', color: '#854D0E', fontSize: '10px', fontWeight: '700', padding: '3px 8px', borderRadius: '6px', letterSpacing: '0.3px' },
-  badgeBlue: { backgroundColor: '#DBEAFE', color: '#1E40AF', fontSize: '10px', fontWeight: '700', padding: '3px 8px', borderRadius: '6px', letterSpacing: '0.3px' },
-  userMetaText: { fontSize: '10.5px', color: '#64748B', fontWeight: '500' },
-  itemTitle: { fontSize: '15px', fontWeight: '700', color: '#0F172A', margin: '4px 0 2px 0', letterSpacing: '-0.2px' },
-  ticketSubTitleText: { fontSize: '12px', fontStyle: 'italic', fontWeight: '400', color: '#475569', margin: '2px 0 8px 0', lineHeight: '1.4' },
-  itemMeta: { fontSize: '11px', color: '#64748B', margin: '2px 0', fontWeight: '500' },
-  fieldLabel: { fontSize: '10px', fontWeight: '700', color: '#475569', letterSpacing: '0.5px', marginBottom: '2px', display: 'block' },
-  expandHintText: { fontSize: '10.5px', color: '#0F766E', fontWeight: '600', marginTop: '8px' },
-  accordionDetailBox: { borderTop: '1px solid #E2E8F0', marginTop: '12px', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px' },
-  detailGridPlain: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  detailRowPlain: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' },
-  fieldValText: { color: '#0F172A', fontWeight: '600', fontSize: '11.5px' },
-  mapContainerBox: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  gpsMapBoxInteractive: { position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid #CBD5E1', cursor: 'pointer' },
-  mapOverlayBadge: { position: 'absolute', bottom: '8px', right: '8px', backgroundColor: 'rgba(15, 118, 110, 0.95)', color: '#FFFFFF', fontSize: '9.5px', fontWeight: '700', padding: '4px 10px', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' },
+  headerTitleGroup: { display: 'flex', alignItems: 'center', gap: '8px' },
+  ticketBadge: { fontSize: '11px', fontWeight: '700', color: '#0F766E', backgroundColor: '#CCFBF1', padding: '4px 10px', borderRadius: '6px', letterSpacing: '0.3px' },
+  badgeOrange: { backgroundColor: '#FEF3C7', color: '#D97706', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '6px', textTransform: 'uppercase' },
+  badgeRed: { backgroundColor: '#FEE2E2', color: '#DC2626', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '6px', textTransform: 'uppercase' },
+  badgeTeal: { backgroundColor: '#CCFBF1', color: '#0F766E', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '6px', textTransform: 'uppercase' },
+  badgeGreen: { backgroundColor: '#DCFCE7', color: '#15803D', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '6px', textTransform: 'uppercase' },
+  badgeBlue: { backgroundColor: '#DBEAFE', color: '#1E40AF', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '6px', textTransform: 'uppercase' },
+  userMetaText: { fontSize: '12px', color: '#64748B', fontWeight: '500' },
+  itemTitle: { fontSize: '15px', fontWeight: '700', color: '#0F172A', margin: '6px 0', lineHeight: '1.35' },
+  itemMeta: { fontSize: '12px', color: '#64748B', margin: '4px 0', fontWeight: '500' },
+  expandHintText: { fontSize: '12px', fontWeight: '600', color: '#0F766E', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' },
+  accordionDetailBox: { marginTop: '14px', paddingTop: '14px', borderTop: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column', gap: '14px' },
+  detailGridPlain: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' },
+  detailRowPlain: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  fieldLabel: { fontSize: '11px', fontWeight: '700', color: '#0F766E', letterSpacing: '0.4px', textTransform: 'uppercase' },
+  fieldValText: { fontSize: '13px', color: '#0F172A', fontWeight: '500', marginTop: '2px' },
+  mapContainerBox: { marginTop: '4px' },
+  gpsMapBoxInteractive: { position: 'relative', borderRadius: '10px', overflow: 'hidden', cursor: 'pointer', marginTop: '6px', border: '1px solid #E2E8F0' },
+  mapOverlayBadge: { position: 'absolute', bottom: '8px', right: '8px', backgroundColor: 'rgba(15, 118, 110, 0.92)', color: '#FFFFFF', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' },
   detailSectionPlain: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  photoGalleryGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginTop: '4px' },
-  thumbImgFixed: { width: '100%', height: '70px', objectFit: 'cover', borderRadius: '8px', cursor: 'pointer', border: '1px solid #CBD5E1' },
-  tagFormRow: { display: 'flex', gap: '8px', marginTop: '4px' },
-  textInputCompact: { flex: 1, padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '11px' },
-  btnTagAction: { padding: '8px 14px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
-  actionRow: { display: 'flex', gap: '10px', marginTop: '8px' },
-  btnInvestigate: { flex: 1, padding: '10px 14px', backgroundColor: '#D97706', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', letterSpacing: '0.2px' },
-  btnApprove: { flex: 1, padding: '10px 14px', backgroundColor: '#15803D', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', letterSpacing: '0.2px' },
-  btnReject: { flex: 1, padding: '10px 14px', backgroundColor: '#DC2626', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', letterSpacing: '0.2px' },
-  btnResolve: { flex: 1, padding: '10px 14px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', letterSpacing: '0.2px' },
-  archiveHeaderRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' },
-  archiveNoticeText: { fontSize: '11px', fontWeight: '700', color: '#991B1B' },
-  btnPurgeAll: { padding: '6px 12px', backgroundColor: '#DC2626', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '10px', fontWeight: '700', cursor: 'pointer' },
-  bulkBoxCardCenter: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '10px', padding: '16px', maxWidth: '680px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '10px' },
-  bulkFormTitle: { fontSize: '14px', fontWeight: '700', color: '#0F172A', margin: 0 },
-  bulkFormSub: { fontSize: '11px', color: '#64748B', margin: 0, lineHeight: '1.4' },
-  selectInput: { width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '11px', boxSizing: 'border-box' },
-  btnBulkSubmit: { width: '100%', padding: '10px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
-  noticeTextSmall: { fontSize: '10px', color: '#64748B', fontStyle: 'italic' },
-  userCardRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '10px', padding: '12px' },
-  userLeftBox: { display: 'flex', alignItems: 'center', gap: '10px' },
-  numBadge: { fontSize: '11px', fontWeight: '700', color: '#64748B' },
-  userNameText: { fontSize: '13px', fontWeight: '700', color: '#0F172A' },
-  userRightActionRow: { display: 'flex', alignItems: 'center', gap: '6px' },
-  btnWarn: { padding: '5px 10px', backgroundColor: '#D97706', color: '#FFFFFF', border: 'none', borderRadius: '5px', fontSize: '10px', fontWeight: '700', cursor: 'pointer' },
-  btnBan: { padding: '5px 10px', backgroundColor: '#DC2626', color: '#FFFFFF', border: 'none', borderRadius: '5px', fontSize: '10px', fontWeight: '700', cursor: 'pointer' },
-  verificationCard: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '10px', padding: '12px' },
-  idPhotoContainer: { margin: '8px 0' },
-  idProofImg: { width: '100%', maxHeight: '140px', objectFit: 'cover', borderRadius: '6px', cursor: 'pointer', border: '1px solid #CBD5E1' },
-  sectionSubTitle: { fontSize: '11px', fontWeight: '700', color: '#475569', letterSpacing: '0.8px', marginTop: '6px' },
-  subTitleSmall: { fontSize: '10px', fontWeight: '700', color: '#0F766E', marginBottom: '4px' },
-  subTicketRow: { fontSize: '10.5px', color: '#334155', padding: '3px 0' },
-  memoActionBox: { marginTop: '8px' },
-  btnMakeMemoPrimary: { padding: '8px 14px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
-  memoPrintHeaderAction: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', backgroundColor: '#FFFFFF', padding: '10px', borderRadius: '8px', border: '1px solid #CBD5E1' },
-  memoPrintNoticeText: { fontSize: '11px', fontWeight: '700', color: '#15803D' },
-  iconBtnRow: { display: 'flex', gap: '6px' },
-  iconBtnPrint: { padding: '6px 10px', backgroundColor: '#15803D', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '10px', fontWeight: '700', cursor: 'pointer' },
-  iconBtnDownloadDoc: { padding: '6px 10px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '10px', fontWeight: '700', cursor: 'pointer' },
-  officialMemoPaper: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '10px', padding: '20px' },
-  memoHeaderSeal: { textAlign: 'center', marginBottom: '14px' },
-  memoRepTitle: { fontSize: '9.5px', fontWeight: '700', color: '#64748B', letterSpacing: '1px' },
-  memoProvinceTitle: { fontSize: '10.5px', fontWeight: '700', color: '#334155', margin: '2px 0' },
-  memoDeptTitle: { fontSize: '12.5px', fontWeight: '700', color: '#0F766E', margin: '2px 0' },
-  memoCenterSub: { fontSize: '8.5px', fontStyle: 'italic', color: '#475569' },
-  memoDividerLine: { height: '2px', backgroundColor: '#0F766E', marginTop: '8px' },
-  memoMetaTable: { backgroundColor: '#F8FAFC', padding: '10px', borderRadius: '6px', border: '1px solid #E2E8F0', marginBottom: '12px', fontSize: '10px' },
-  memoMetaRow: { marginBottom: '3px', color: '#334155' },
-  memoSectionHeading: { fontSize: '10.5px', fontWeight: '700', color: '#0F766E', letterSpacing: '0.5px', borderBottom: '1px solid #CCFBF1', paddingBottom: '3px', margin: '12px 0 6px 0' },
-  formalTable: { width: '100%', borderCollapse: 'collapse', fontSize: '10px', marginBottom: '8px' },
-  tableLabelCell: { fontWeight: '700', color: '#475569', padding: '4px 8px 4px 0', width: '35%' },
-  tableValCell: { color: '#0F172A', padding: '4px 0' },
-  memoDescriptionBox: { backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '10px', fontSize: '10px', color: '#334155', lineHeight: '1.4' },
-  memoPhotoGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginTop: '6px' },
-  exhibitPhotoCard: { textAlign: 'center', border: '1px solid #E2E8F0', padding: '6px', borderRadius: '6px', backgroundColor: '#F8FAFC' },
-  memoThumbImgFixed: { width: '100%', height: '100px', objectFit: 'cover', borderRadius: '4px' },
-  exhibitTag: { fontSize: '8.5px', fontWeight: '700', color: '#475569', marginTop: '4px' },
-  noPhotoNoticeBox: { fontSize: '10px', fontStyle: 'italic', color: '#64748B', padding: '8px', backgroundColor: '#F8FAFC', borderRadius: '6px', textAlign: 'center' },
-  memoDirectiveText: { fontSize: '10px', color: '#334155', lineHeight: '1.4', margin: '6px 0' },
-  signatureRow: { display: 'flex', justifyContent: 'space-between', marginTop: '30px', paddingTop: '10px' },
+  descTextPlain: { fontSize: '13px', color: '#1E293B', margin: 0, lineHeight: '1.6', backgroundColor: '#F8FAFC', padding: '12px 14px', borderRadius: '8px', border: '1px solid #E2E8F0', fontWeight: '400' },
+  photoGalleryGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '10px', marginTop: '4px' },
+  thumbImgFixed: { width: '100%', height: '80px', objectFit: 'cover', borderRadius: '8px', cursor: 'pointer', border: '1px solid #E2E8F0', transition: 'transform 0.2s' },
+  tagFormRow: { display: 'flex', gap: '10px', marginTop: '4px', alignItems: 'center' },
+  textInputCompact: { flex: 1, padding: '9px 12px', fontSize: '13px', border: '1px solid #CBD5E1', borderRadius: '8px', color: '#0F172A', backgroundColor: '#FFFFFF' },
+  btnTagAction: { padding: '9px 16px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s' },
+  actionRow: { display: 'flex', gap: '10px', marginTop: '6px' },
+  btnInvestigate: { flex: 1, padding: '10px 14px', backgroundColor: '#D97706', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', transition: 'all 0.2s' },
+  btnApprove: { flex: 1, padding: '10px 14px', backgroundColor: '#15803D', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', transition: 'all 0.2s' },
+  btnReject: { flex: 1, padding: '10px 14px', backgroundColor: '#DC2626', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', transition: 'all 0.2s' },
+  btnResolve: { flex: 1, padding: '10px 14px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', transition: 'all 0.2s' },
+  archiveHeaderRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
+  archiveNoticeText: { fontSize: '12px', fontWeight: '600', color: '#64748B' },
+  btnPurgeAll: { padding: '8px 14px', backgroundColor: '#DC2626', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
+  assignedBadgeBox: { backgroundColor: '#F8FAFC', border: '1px solid #CBD5E1', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', color: '#334155', margin: '6px 0', lineHeight: '1.4' },
+  btnDispatch: { padding: '8px 14px', backgroundColor: '#1E40AF', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
+  bulkBoxCardCenter: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '20px', maxWidth: '680px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '14px', boxShadow: '0 2px 4px rgba(0,0,0,0.04)' },
+  bulkFormTitle: { fontSize: '16px', fontWeight: '700', color: '#0F172A', margin: 0 },
+  formGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  label: { fontSize: '11px', fontWeight: '700', color: '#0F766E', letterSpacing: '0.4px', textTransform: 'uppercase' },
+  selectInput: { padding: '10px 12px', fontSize: '13px', border: '1px solid #CBD5E1', borderRadius: '8px', color: '#0F172A', backgroundColor: '#FFFFFF' },
+  textareaInput: { padding: '10px 12px', fontSize: '13px', border: '1px solid #CBD5E1', borderRadius: '8px', color: '#0F172A', backgroundColor: '#FFFFFF', lineHeight: '1.5', fontFamily: 'inherit' },
+  btnAutoNotice: { padding: '6px 12px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
+  fileUploadBox: { border: '2px dashed #CBD5E1', borderRadius: '8px', padding: '16px', textAlign: 'center', cursor: 'pointer', backgroundColor: '#F8FAFC' },
+  fileInputHidden: { display: 'none' },
+  uploadLabelText: { fontSize: '12px', fontWeight: '600', color: '#0F766E' },
+  photoPreviewThumb: { width: '100%', maxHeight: '140px', objectFit: 'cover', borderRadius: '8px', marginTop: '8px' },
+  btnBulkSubmit: { width: '100%', padding: '12px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', transition: 'all 0.2s' },
+  userCardRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '14px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' },
+  userMainGroup: { display: 'flex', alignItems: 'center', gap: '12px' },
+  numBadge: { fontSize: '12px', fontWeight: '700', color: '#64748B' },
+  userTagText: { fontSize: '14px', fontWeight: '700', color: '#0F172A' },
+  userStatusPillBox: { display: 'flex', gap: '8px', alignItems: 'center', marginTop: '2px' },
+  actionBtnGroup: { display: 'flex', gap: '8px' },
+  btnWarn: { padding: '6px 12px', backgroundColor: '#D97706', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
+  btnBan: { padding: '6px 12px', backgroundColor: '#DC2626', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
+  verificationCard: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' },
+  userNameText: { fontSize: '15px', fontWeight: '700', color: '#0F172A' },
+  idPhotoContainer: { marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #F1F5F9' },
+  idProofThumb: { width: '100%', maxHeight: '160px', objectFit: 'contain', borderRadius: '8px', border: '1px solid #E2E8F0', marginTop: '6px', cursor: 'pointer', backgroundColor: '#F8FAFC' },
+  categoryGroupCard: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' },
+  categoryHeaderRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
+  categoryPillBadge: { fontSize: '12px', fontWeight: '700', color: '#0F766E', backgroundColor: '#CCFBF1', padding: '4px 10px', borderRadius: '6px', letterSpacing: '0.3px' },
+  categoryCountText: { fontSize: '12px', fontWeight: '600', color: '#64748B' },
+  categoryLocationList: { fontSize: '12px', color: '#475569', margin: '4px 0 10px 0', lineHeight: '1.4' },
+  subTicketsScrollBox: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px', maxHeight: '200px', overflowY: 'auto' },
+  subTicketRow: { backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', padding: '10px 12px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  subTicketRef: { fontSize: '12px', fontWeight: '700', color: '#0F172A' },
+  subTicketLoc: { fontSize: '11px', color: '#64748B' },
+  sectionSubTitle: { fontSize: '12px', fontWeight: '700', color: '#475569', letterSpacing: '0.8px', marginTop: '8px', textTransform: 'uppercase' },
+  memoSelectCard: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' },
+  memoGroupCard: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '14px', cursor: 'pointer', transition: 'all 0.2s' },
+  memoGroupCardSelected: { backgroundColor: '#F0FDF4', border: '2px solid #0F766E', borderRadius: '12px', padding: '14px', cursor: 'pointer' },
+  subTitleSmall: { fontSize: '11px', fontWeight: '700', color: '#0F766E', marginBottom: '4px', textTransform: 'uppercase' },
+  btnMakeMemoPrimary: { padding: '8px 14px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
+  memoDescText: { fontSize: '12px', color: '#64748B', lineHeight: '1.4', margin: '4px 0' },
+  memoPrintHeaderAction: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', backgroundColor: '#F8FAFC', padding: '12px 16px', borderRadius: '10px', border: '1px solid #E2E8F0' },
+  memoPrintNoticeText: { fontSize: '12px', fontWeight: '600', color: '#334155' },
+  iconBtnPrint: { padding: '8px 14px', backgroundColor: '#1E40AF', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
+  iconBtnDownloadDoc: { padding: '8px 14px', backgroundColor: '#15803D', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
+  officialMemoPaper: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '12px', padding: '24px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' },
+  memoHeaderCenter: { textAlign: 'center', marginBottom: '16px' },
+  memoRepTitle: { fontSize: '11px', fontWeight: '700', color: '#64748B', letterSpacing: '1px', textTransform: 'uppercase' },
+  memoProvinceTitle: { fontSize: '12px', fontWeight: '700', color: '#334155', margin: '2px 0' },
+  memoDeptTitle: { fontSize: '15px', fontWeight: '700', color: '#0F766E', margin: '4px 0' },
+  memoCenterSub: { fontSize: '11px', color: '#64748B' },
+  memoDividerLine: { height: '2px', backgroundColor: '#0F766E', margin: '12px 0' },
+  memoMetaTable: { backgroundColor: '#F8FAFC', padding: '12px 14px', borderRadius: '8px', border: '1px solid #E2E8F0', marginBottom: '16px', fontSize: '12px' },
+  memoMetaRow: { marginBottom: '4px', color: '#334155', lineHeight: '1.4' },
+  memoSectionHeading: { fontSize: '12px', fontWeight: '700', color: '#0F766E', letterSpacing: '0.5px', borderBottom: '1px solid #CCFBF1', paddingBottom: '4px', margin: '16px 0 8px 0', textTransform: 'uppercase' },
+  formalTable: { width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '12px' },
+  tableLabelCell: { fontWeight: '700', color: '#475569', padding: '6px 8px 6px 0', width: '35%' },
+  tableValCell: { color: '#0F172A', padding: '6px 0', fontWeight: '500' },
+  memoDescriptionBox: { backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px 14px', fontSize: '12px', color: '#334155', lineHeight: '1.5' },
+  memoPhotoGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginTop: '8px' },
+  exhibitPhotoCard: { textAlign: 'center', border: '1px solid #E2E8F0', padding: '8px', borderRadius: '8px', backgroundColor: '#F8FAFC' },
+  memoThumbImgFixed: { width: '100%', height: '110px', objectFit: 'cover', borderRadius: '6px' },
+  exhibitTag: { fontSize: '10px', fontWeight: '700', color: '#475569', marginTop: '6px', textTransform: 'uppercase' },
+  noPhotoNoticeBox: { fontSize: '12px', fontStyle: 'italic', color: '#64748B', padding: '10px', backgroundColor: '#F8FAFC', borderRadius: '8px', textAlign: 'center' },
+  memoDirectiveText: { fontSize: '12px', color: '#334155', lineHeight: '1.5', margin: '8px 0' },
+  signatureRow: { display: 'flex', justifyContent: 'space-between', marginTop: '36px', paddingTop: '16px' },
   sigBlock: { textAlign: 'center', width: '40%' },
-  sigLine: { borderBottom: '1px solid #334155', marginBottom: '4px' },
-  sigName: { fontSize: '9.5px', fontWeight: '700', color: '#0F172A' },
-  sigTitle: { fontSize: '8.5px', color: '#64748B' },
+  sigLine: { borderBottom: '1px solid #334155', marginBottom: '6px' },
+  sigName: { fontSize: '11px', fontWeight: '700', color: '#0F172A' },
+  sigTitle: { fontSize: '10px', color: '#64748B' },
+  resolvedSubTicketCard: { backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '10px', padding: '12px', marginTop: '8px' },
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' },
-  modalContent: { backgroundColor: '#FFFFFF', borderRadius: '14px', padding: '14px', maxWidth: '400px', width: '100%', textAlign: 'center' },
-  fullModalImg: { maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', borderRadius: '8px' },
-  modalCloseBtn: { backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', padding: '8px 16px', borderRadius: '8px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', marginTop: '10px' }
+  modalContent: { backgroundColor: '#FFFFFF', borderRadius: '16px', padding: '20px', maxWidth: '440px', width: '100%', textAlign: 'center', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' },
+  fullModalImg: { maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', borderRadius: '10px' },
+  modalCloseBtn: { backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', padding: '10px 18px', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', marginTop: '14px' }
 };

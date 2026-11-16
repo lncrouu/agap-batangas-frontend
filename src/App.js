@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { adminSupabase, supabase } from './supabaseClient';
-import { verifyAdminAccess } from './services/adminService';
+import React, { useState, useEffect } from 'react';
+import { supabase } from './supabaseClient';
 import LandingScreen from './screens/LandingScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import ReportSubmitScreen from './screens/ReportSubmitScreen';
@@ -8,21 +7,13 @@ import HotlinesScreen from './screens/HotlineScreen';
 import ReportTrackerScreen from './screens/ReportTrackerScreen';
 import DangerZoneMapScreen from './screens/DangerZoneMapScreen';
 import AdminScreen from './screens/AdminScreen';
-import AdminLoginScreen from './screens/AdminLoginScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import ResponderScreen from './screens/ResponderScreen';
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState('landing');
-  const [userRole, setUserRole] = useState('GUEST');
+  const [currentScreen, setCurrentScreen] = useState('landing'); 
+  const [userRole, setUserRole] = useState('GUEST'); 
   const [userProfile, setUserProfile] = useState(null);
-<<<<<<< HEAD
-  const [authReady, setAuthReady] = useState(false);
-  const [startupError, setStartupError] = useState('');
-
-  useEffect(() => {
-    let active = true;
-=======
   const [showSplash, setShowSplash] = useState(true);
   const [showAdminPinModal, setShowAdminPinModal] = useState(false);
   const [adminPinInput, setAdminPinInput] = useState('');
@@ -44,28 +35,21 @@ export default function App() {
     }, 2500);
     return () => clearTimeout(splashTimer);
   }, []);
->>>>>>> 00f93ad (Admin Update)
 
-    const initialize = async () => {
-      try {
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError) throw sessionError;
+  const checkExistingDeviceProfile = async () => {
+    let localDeviceId = localStorage.getItem('agap_device_id');
+    if (!localDeviceId) {
+      localDeviceId = 'DEV-' + Math.floor(100000 + Math.random() * 900000);
+      localStorage.setItem('agap_device_id', localDeviceId);
+    }
 
-        let user = session?.user;
-        if (!user) {
-          const { data, error } = await supabase.auth.signInAnonymously();
-          if (error) throw error;
-          user = data.user;
-        }
-        if (!user) throw new Error('Supabase did not create an authenticated guest session.');
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('device_id', localDeviceId)
+        .maybeSingle();
 
-<<<<<<< HEAD
-        let deviceId = localStorage.getItem('agap_device_id');
-        if (!deviceId) {
-          deviceId = `DEV-${Math.floor(100000 + Math.random() * 900000)}`;
-          localStorage.setItem('agap_device_id', deviceId);
-        }
-=======
       if (data) {
         setUserProfile(data);
         setUserRole(data.user_role || 'GUEST');
@@ -80,85 +64,28 @@ export default function App() {
           verification_status: 'GUEST',
           barangay: 'Batangas City'
         };
->>>>>>> 00f93ad (Admin Update)
 
-        const { data: profile, error: profileError } = await supabase
+        const { data: createdProfile, error } = await supabase
           .from('profiles')
-<<<<<<< HEAD
-          .select('*')
-          .eq('auth_user_id', user.id)
-=======
           .upsert([newGuestProfile], { onConflict: 'device_id' })
           .select()
->>>>>>> 00f93ad (Admin Update)
           .maybeSingle();
-        if (profileError) throw profileError;
 
-<<<<<<< HEAD
-        let resolvedProfile = profile;
-        if (!resolvedProfile) {
-          const { data: createdProfile, error: createError } = await supabase
-            .from('profiles')
-            .insert({
-              id: `USER-${user.id}`,
-              auth_user_id: user.id,
-              device_id: deviceId,
-              username: 'Guest User',
-              full_name: 'Unverified Guest',
-              user_role: 'GUEST',
-              verification_status: 'GUEST',
-              barangay: 'Batangas City'
-            })
-            .select()
-            .single();
-          if (createError) throw createError;
-          resolvedProfile = createdProfile;
-        }
-
-        let administrator = false;
-        const { data: { session: adminSession }, error: adminSessionError } =
-          await adminSupabase.auth.getSession();
-        if (adminSessionError) throw adminSessionError;
-        if (adminSession?.access_token) {
-          try {
-            await verifyAdminAccess();
-            administrator = true;
-          } catch (error) {
-            await adminSupabase.auth.signOut();
-            if (error.message !== 'Administrator sign-in is required.') {
-              console.warn('Saved admin session is no longer authorized:', error.message);
-            }
-          }
-        }
-
-        if (active) {
-          setUserProfile(resolvedProfile);
-          setUserRole(administrator ? 'ADMIN' : 'GUEST');
-          if (administrator) setCurrentScreen('admin');
-          setAuthReady(true);
-        }
-      } catch (error) {
-        if (active) {
-          setStartupError(error.message || 'Unable to initialize the AGAP authentication session.');
-          setAuthReady(true);
-=======
         if (!error && createdProfile) {
           setUserProfile(createdProfile);
           setUserRole('GUEST');
         } else {
           setUserProfile(newGuestProfile);
           setUserRole('GUEST');
->>>>>>> 00f93ad (Admin Update)
         }
       }
-    };
-
-    initialize();
-    return () => { active = false; };
-  }, []);
+    } catch (err) {
+      console.log('Device registration check:', err.message);
+    }
+  };
 
   const handleResidentAccess = () => {
-    if (userProfile?.full_name && userProfile.verification_status !== 'GUEST') {
+    if (userProfile && userProfile.full_name && userProfile.verification_status !== 'GUEST') {
       setCurrentScreen('dashboard');
     } else {
       setCurrentScreen('profile');
@@ -170,11 +97,6 @@ export default function App() {
     setCurrentScreen('dashboard');
   };
 
-<<<<<<< HEAD
-  const handleAdminAuthenticated = () => {
-    setUserRole('ADMIN');
-    setCurrentScreen('admin');
-=======
   const handleNavigate = (screenKey) => {
     if (screenKey === 'submit-report' && userProfile?.verification_status === 'BANNED') {
       alert('ACCESS RESTRICTED: Your device fingerprint has been banned due to repeated false hazard submissions. Contact CDRRMO Batangas to appeal.');
@@ -207,17 +129,6 @@ export default function App() {
     } else {
       setPinError('Invalid Passcode! Access restricted to authorized CDRRMO personnel.');
     }
->>>>>>> 00f93ad (Admin Update)
-  };
-
-  const handleAdminLogout = async () => {
-    const { error } = await adminSupabase.auth.signOut();
-    if (error) {
-      setStartupError(`Admin sign-out failed: ${error.message}`);
-      return;
-    }
-    setUserRole('GUEST');
-    setCurrentScreen('dashboard');
   };
 
   return (
@@ -231,15 +142,6 @@ export default function App() {
         }
       `}</style>
       <div style={styles.screenWrapper}>
-<<<<<<< HEAD
-        {!authReady ? (
-          <div style={styles.message}>Connecting securely to AGAP...</div>
-        ) : startupError ? (
-          <div role="alert" style={styles.error}>
-            <strong>AGAP could not start.</strong>
-            <p>{startupError}</p>
-            <button onClick={() => window.location.reload()}>Retry</button>
-=======
         {showSplash ? (
           <div style={styles.splashContainer}>
             <div style={styles.radarPulseRing}></div>
@@ -253,18 +155,10 @@ export default function App() {
             <h1 style={styles.splashTitle}>PROJECT AGAP</h1>
             <p style={styles.splashTagline}>Active Guardianship & Alert Protocol</p>
             <div style={styles.splashBadge}>BATANGAS PROVINCIAL EMERGENCY SYSTEM</div>
->>>>>>> 00f93ad (Admin Update)
           </div>
         ) : (
           <>
             {currentScreen === 'landing' && (
-<<<<<<< HEAD
-              <LandingScreen onResidentAccess={handleResidentAccess} onGuestAccess={handleGuestAccess} />
-            )}
-            {currentScreen === 'dashboard' && (
-              <DashboardScreen
-                onNavigate={setCurrentScreen}
-=======
               <LandingScreen
                 onResidentAccess={handleResidentAccess}
                 onGuestAccess={handleGuestAccess}
@@ -274,37 +168,10 @@ export default function App() {
             {currentScreen === 'dashboard' && (
               <DashboardScreen
                 onNavigate={handleNavigate}
->>>>>>> 00f93ad (Admin Update)
                 userRole={userRole}
                 onOpenProfile={() => setCurrentScreen('profile')}
               />
             )}
-<<<<<<< HEAD
-            {currentScreen === 'profile' && (
-              <ProfileScreen
-                onBack={() => setCurrentScreen('dashboard')}
-                onAdminLogin={() => setCurrentScreen('admin-login')}
-              />
-            )}
-            {currentScreen === 'admin-login' && (
-              <AdminLoginScreen
-                onBack={() => setCurrentScreen('profile')}
-                onAuthenticated={handleAdminAuthenticated}
-              />
-            )}
-            {currentScreen === 'submit-report' && (
-              <ReportSubmitScreen
-                onBack={() => setCurrentScreen('dashboard')}
-                onSubmitSuccess={() => setCurrentScreen('dashboard')}
-                userRole={userRole}
-              />
-            )}
-            {currentScreen === 'hotlines' && <HotlinesScreen onBack={() => setCurrentScreen('dashboard')} />}
-            {currentScreen === 'tracker' && <ReportTrackerScreen onBack={() => setCurrentScreen('dashboard')} />}
-            {currentScreen === 'danger-map' && <DangerZoneMapScreen onBack={() => setCurrentScreen('dashboard')} />}
-            {currentScreen === 'admin' && <AdminScreen onBack={handleAdminLogout} />}
-          </>
-=======
 
             {currentScreen === 'profile' && (
               <ProfileScreen
@@ -407,7 +274,6 @@ export default function App() {
               </form>
             </div>
           </div>
->>>>>>> 00f93ad (Admin Update)
         )}
       </div>
     </div>
@@ -415,25 +281,6 @@ export default function App() {
 }
 
 const styles = {
-<<<<<<< HEAD
-  appContainer: {
-    minHeight: '100vh',
-    backgroundColor: '#0F172A',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    fontFamily: "'Inter', sans-serif"
-  },
-  screenWrapper: {
-    width: '100%',
-    maxWidth: '440px',
-    minHeight: '100vh',
-    backgroundColor: '#F8FAFC',
-    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)'
-  },
-  message: { padding: '32px', color: '#334155', textAlign: 'center' },
-  error: { margin: '24px', padding: '16px', background: '#FEF2F2', color: '#991B1B', borderRadius: '8px' }
-=======
   appContainer: { minHeight: '100vh', backgroundColor: '#0F172A', display: 'flex', justifyContent: 'center', alignItems: 'center', fontFamily: "'Inter', sans-serif" },
   screenWrapper: { width: '100%', maxWidth: '440px', minHeight: '100vh', backgroundColor: '#F8FAFC', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)', position: 'relative' },
   splashContainer: { display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#0F172A', color: '#FFFFFF', padding: '24px', textAlign: 'center', position: 'relative', overflow: 'hidden' },
@@ -456,5 +303,4 @@ const styles = {
   errorText: { fontSize: '10px', fontWeight: '700', color: '#DC2626', marginTop: '4px' },
   hintText: { fontSize: '10px', color: '#0F766E', marginTop: '6px', backgroundColor: '#F0FDF4', padding: '6px', borderRadius: '6px' },
   verifyBtn: { width: '100%', padding: '12px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '800', cursor: 'pointer' }
->>>>>>> 00f93ad (Admin Update)
 };

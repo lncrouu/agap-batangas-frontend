@@ -96,6 +96,18 @@ export default function ResponderScreen({ onBack }) {
 
   return (
     <div style={styles.container}>
+      {/* Global Typography Reset */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        * {
+          box-sizing: border-box;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+        }
+        button, input, select, textarea, option {
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+        }
+      `}</style>
+
       <div style={styles.navHeader}>
         <button style={styles.backBtn} onClick={onBack}>&lt; Back</button>
         <div>
@@ -236,47 +248,47 @@ export default function ResponderScreen({ onBack }) {
 }
 
 const styles = {
-  container: { maxWidth: '440px', margin: '0 auto', padding: '16px', fontFamily: "'Inter', sans-serif", boxSizing: 'border-box' },
-  navHeader: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' },
+  container: { maxWidth: '480px', margin: '0 auto', padding: '16px', fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", boxSizing: 'border-box' },
+  navHeader: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' },
   backBtn: { backgroundColor: 'transparent', border: 'none', color: '#0F766E', fontSize: '14px', fontWeight: '700', cursor: 'pointer' },
-  headerTitle: { fontSize: '18px', fontWeight: '800', color: '#0F172A', margin: 0 },
-  headerSub: { fontSize: '11px', color: '#64748B' },
-  teamTabContainer: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '12px' },
-  teamTabActive: { padding: '8px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '10px', fontWeight: '800', cursor: 'pointer' },
-  teamTabInactive: { padding: '8px', backgroundColor: '#F1F5F9', color: '#475569', border: '1px solid #CBD5E1', borderRadius: '8px', fontSize: '10px', fontWeight: '700', cursor: 'pointer' },
-  statusBanner: { backgroundColor: '#F0FDF4', border: '1px solid #99F6E4', color: '#0F766E', padding: '8px 12px', borderRadius: '8px', fontSize: '10px', marginBottom: '14px' },
-  loadingBox: { padding: '24px', textAlign: 'center', color: '#64748B', fontSize: '12px' },
-  emptyCard: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '12px', padding: '24px', textAlign: 'center' },
-  emptyTitle: { fontSize: '12px', fontWeight: '800', color: '#0F766E', marginBottom: '4px' },
-  emptySub: { fontSize: '10px', color: '#64748B' },
-  reportsStack: { display: 'flex', flexDirection: 'column', gap: '12px' },
-  reportCard: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '12px', padding: '14px' },
+  headerTitle: { fontSize: '18px', fontWeight: '700', color: '#0F172A', margin: 0, letterSpacing: '-0.2px' },
+  headerSub: { fontSize: '12px', color: '#64748B', fontWeight: '500' },
+  teamTabContainer: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '14px' },
+  teamTabActive: { padding: '10px 12px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', transition: 'all 0.2s' },
+  teamTabInactive: { padding: '10px 12px', backgroundColor: '#F1F5F9', color: '#475569', border: '1px solid #CBD5E1', borderRadius: '8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s' },
+  statusBanner: { backgroundColor: '#F0FDF4', border: '1px solid #99F6E4', color: '#0F766E', padding: '10px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '600', marginBottom: '16px', lineHeight: '1.4' },
+  loadingBox: { padding: '24px', textAlign: 'center', color: '#64748B', fontSize: '13px' },
+  emptyCard: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '24px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' },
+  emptyTitle: { fontSize: '14px', fontWeight: '700', color: '#0F766E', marginBottom: '4px' },
+  emptySub: { fontSize: '12px', color: '#64748B' },
+  reportsStack: { display: 'flex', flexDirection: 'column', gap: '14px' },
+  reportCard: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' },
   rowBetween: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
-  badgeDispatched: { fontSize: '9px', fontWeight: '800', backgroundColor: '#FEF3C7', color: '#D97706', padding: '3px 8px', borderRadius: '6px' },
-  badgeEnRoute: { fontSize: '9px', fontWeight: '800', backgroundColor: '#DBEAFE', color: '#1D4ED8', padding: '3px 8px', borderRadius: '6px' },
-  badgeOnScene: { fontSize: '9px', fontWeight: '800', backgroundColor: '#DCFCE7', color: '#15803D', padding: '3px 8px', borderRadius: '6px' },
-  ticketTag: { fontSize: '10px', fontWeight: '800', color: '#64748B' },
-  reportTitle: { fontSize: '14px', fontWeight: '800', color: '#0F172A', margin: '0 0 6px 0' },
-  reportMeta: { fontSize: '11px', color: '#334155', margin: '2px 0' },
-  descriptionBox: { backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', padding: '8px', borderRadius: '6px', fontSize: '10px', color: '#475569', margin: '8px 0' },
-  actionRow: { display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '10px' },
-  btnEnRoute: { padding: '8px', backgroundColor: '#1D4ED8', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '800', cursor: 'pointer' },
-  btnOnScene: { padding: '8px', backgroundColor: '#15803D', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '800', cursor: 'pointer' },
-  btnResolveModal: { padding: '8px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '800', cursor: 'pointer' },
+  badgeDispatched: { fontSize: '11px', fontWeight: '700', backgroundColor: '#FEF3C7', color: '#D97706', padding: '4px 10px', borderRadius: '6px', textTransform: 'uppercase' },
+  badgeEnRoute: { fontSize: '11px', fontWeight: '700', backgroundColor: '#DBEAFE', color: '#1D4ED8', padding: '4px 10px', borderRadius: '6px', textTransform: 'uppercase' },
+  badgeOnScene: { fontSize: '11px', fontWeight: '700', backgroundColor: '#DCFCE7', color: '#15803D', padding: '4px 10px', borderRadius: '6px', textTransform: 'uppercase' },
+  ticketTag: { fontSize: '12px', fontWeight: '700', color: '#0F766E', backgroundColor: '#CCFBF1', padding: '3px 8px', borderRadius: '6px' },
+  reportTitle: { fontSize: '15px', fontWeight: '700', color: '#0F172A', margin: '0 0 6px 0', lineHeight: '1.3' },
+  reportMeta: { fontSize: '12px', color: '#475569', margin: '3px 0', lineHeight: '1.4', fontWeight: '500' },
+  descriptionBox: { backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', padding: '10px 12px', borderRadius: '8px', fontSize: '12px', color: '#334155', margin: '10px 0', lineHeight: '1.5' },
+  actionRow: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' },
+  btnEnRoute: { padding: '10px', backgroundColor: '#1D4ED8', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
+  btnOnScene: { padding: '10px', backgroundColor: '#15803D', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
+  btnResolveModal: { padding: '10px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
   modalBackdrop: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, padding: '16px' },
-  modalContent: { backgroundColor: '#FFFFFF', borderRadius: '16px', padding: '18px', maxWidth: '360px', width: '100%' },
-  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
-  modalTitle: { fontSize: '14px', fontWeight: '800', color: '#0F172A' },
-  closeBtn: { backgroundColor: '#F1F5F9', border: 'none', width: '26px', height: '26px', borderRadius: '50%', fontSize: '11px', fontWeight: '800', color: '#64748B', cursor: 'pointer' },
-  modalTicket: { fontSize: '10px', fontWeight: '800', color: '#64748B' },
-  modalHazard: { fontSize: '13px', fontWeight: '800', color: '#0F766E', marginBottom: '12px' },
-  formGroup: { marginBottom: '12px' },
-  label: { fontSize: '9px', fontWeight: '800', color: '#64748B', display: 'block', marginBottom: '4px' },
-  textarea: { width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '11px', boxSizing: 'border-box', fontFamily: 'inherit' },
-  previewBox: { width: '100%', height: '100px', borderRadius: '6px', overflow: 'hidden', border: '1px solid #0F766E', marginBottom: '6px' },
+  modalContent: { backgroundColor: '#FFFFFF', borderRadius: '16px', padding: '20px', maxWidth: '400px', width: '100%', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' },
+  modalTitle: { fontSize: '15px', fontWeight: '700', color: '#0F172A' },
+  closeBtn: { backgroundColor: '#F1F5F9', border: 'none', width: '28px', height: '28px', borderRadius: '50%', fontSize: '12px', fontWeight: '700', color: '#64748B', cursor: 'pointer' },
+  modalTicket: { fontSize: '12px', fontWeight: '700', color: '#0F766E' },
+  modalHazard: { fontSize: '14px', fontWeight: '700', color: '#0F172A', marginBottom: '14px' },
+  formGroup: { marginBottom: '14px' },
+  label: { fontSize: '11px', fontWeight: '700', color: '#0F766E', display: 'block', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.4px' },
+  textarea: { width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '12px', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: '1.5' },
+  previewBox: { width: '100%', height: '120px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #0F766E', marginBottom: '8px' },
   previewImg: { width: '100%', height: '100%', objectFit: 'cover' },
-  fileDropzone: { border: '2px dashed #0F766E', backgroundColor: '#F0FDF4', padding: '8px', borderRadius: '6px', display: 'block', textAlign: 'center', fontSize: '10px', fontWeight: '800', color: '#0F766E', cursor: 'pointer' },
-  modalBtnRow: { display: 'flex', gap: '8px', marginTop: '14px' },
-  cancelBtn: { flex: 1, padding: '9px', backgroundColor: '#F1F5F9', color: '#475569', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '800', cursor: 'pointer' },
-  confirmBtn: { flex: 1, padding: '9px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '800', cursor: 'pointer' }
+  fileDropzone: { border: '2px dashed #0F766E', backgroundColor: '#F0FDF4', padding: '12px', borderRadius: '8px', display: 'block', textAlign: 'center', fontSize: '12px', fontWeight: '700', color: '#0F766E', cursor: 'pointer' },
+  modalBtnRow: { display: 'flex', gap: '10px', marginTop: '16px' },
+  cancelBtn: { flex: 1, padding: '10px', backgroundColor: '#F1F5F9', color: '#475569', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
+  confirmBtn: { flex: 1, padding: '10px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }
 };
