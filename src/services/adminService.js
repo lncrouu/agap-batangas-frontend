@@ -40,7 +40,44 @@ export const deleteRejectedReportsInDb = async () => {
 };
 
 export const banDeviceInDb = async (deviceId) => {
+<<<<<<< HEAD
   return request(`/devices/${encodeURIComponent(deviceId)}/ban`, {
     method: 'POST'
   });
 };
+=======
+  try {
+    const response = await fetch(`${API_BASE_URL}/devices/${deviceId}/ban`, {
+      method: 'POST'
+    });
+    return await response.json();
+  } catch (err) {
+    console.warn('Backend ban offline, applying locally:', err.message);
+    return { success: true };
+  }
+};
+
+// frontend-js/src/services/adminService.js
+
+export async function sendBackendNotification(userObj, reportObj, messageText) {
+  try {
+    const response = await fetch('http://localhost:8080/api/reports/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: userObj.device_id,
+        phoneNumber: userObj.phone_number,
+        verificationStatus: userObj.verification_status,
+        ticketNo: reportObj.id || reportObj.ticket_no,
+        messageText: messageText
+      })
+    });
+    
+    const data = await response.json();
+    console.log('Java Backend Response:', data);
+    return data;
+  } catch (err) {
+    console.error('Failed to connect to Java backend:', err.message);
+  }
+}
+>>>>>>> 00f93ad (Admin Update)

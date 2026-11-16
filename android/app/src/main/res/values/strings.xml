@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Project AGAP</string>
+    <string name="title_activity_main">Project AGAP</string>
+    <string name="package_name">ph.project.agap.batangas</string>
+    <string name="custom_url_scheme">ph.project.agap.batangas</string>
+</resources>

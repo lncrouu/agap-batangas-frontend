@@ -2,6 +2,26 @@ import React, { useState } from 'react';
 
 export default function LandingScreen({ onResidentAccess, onGuestAccess }) {
   const [selectedStatus, setSelectedStatus] = useState(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [pendingChoice, setPendingChoice] = useState(null); // 'resident' | 'guest'
+
+  const handleSelectChoice = (choice) => {
+    setPendingChoice(choice);
+    setShowConfirmModal(true);
+  };
+
+  const confirmChoiceExecution = () => {
+    setShowConfirmModal(false);
+    if (pendingChoice === 'resident') {
+      localStorage.setItem('agap_user_access_type', 'resident');
+      setSelectedStatus('resident');
+      onResidentAccess();
+    } else if (pendingChoice === 'guest') {
+      localStorage.setItem('agap_user_access_type', 'guest');
+      setSelectedStatus('guest');
+      onGuestAccess();
+    }
+  };
 
   return (
     <div style={styles.pageBackground}>
@@ -38,10 +58,7 @@ export default function LandingScreen({ onResidentAccess, onGuestAccess }) {
           <div style={styles.buttonStack}>
             <button
               style={{ ...styles.btn, ...styles.btnPrimary }}
-              onClick={() => {
-                setSelectedStatus('resident');
-                onResidentAccess();
-              }}
+              onClick={() => handleSelectChoice('resident')}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12"/>
@@ -51,12 +68,9 @@ export default function LandingScreen({ onResidentAccess, onGuestAccess }) {
 
             <button
               style={{ ...styles.btn, ...styles.btnSecondary }}
-              onClick={() => {
-                setSelectedStatus('guest');
-                onGuestAccess();
-              }}
+              onClick={() => handleSelectChoice('guest')}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10"/>
                 <line x1="12" y1="8" x2="12" y2="12"/>
                 <line x1="12" y1="16" x2="12.01" y2="16"/>
@@ -66,16 +80,35 @@ export default function LandingScreen({ onResidentAccess, onGuestAccess }) {
           </div>
         </div>
 
-        {selectedStatus === 'guest' && (
-          <div style={styles.guestNotice}>
-            <strong>GUEST ACCESS NOTICE:</strong> Incident reporting features are restricted to verified Batangas residents. For immediate national assistance, please dial <strong>911</strong>.
-          </div>
-        )}
-
         <div style={styles.footerInfo}>
           Official LGU Emergency Hotlines | <strong>(043) 723-0000</strong>
         </div>
       </div>
+
+      {/* 2nd Verification Confirmation Modal */}
+      {showConfirmModal && (
+        <div style={styles.modalBackdrop} onClick={() => setShowConfirmModal(false)}>
+          <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <span style={styles.modalTitle}>CONFIRM ACCESS TYPE</span>
+              <button style={styles.closeBtn} onClick={() => setShowConfirmModal(false)}>✕</button>
+            </div>
+            <p style={styles.modalBodyText}>
+              Are you sure you want to enter Project AGAP as a <strong>{pendingChoice === 'resident' ? 'Batangas Resident' : 'Guest Visitor'}</strong>?
+            </p>
+            <p style={styles.modalSubNote}>
+              {pendingChoice === 'resident'
+                ? 'Residents can file hazard reports and request full profile verification.'
+                : 'Guest visitors can view hazard maps and call hotlines. Incident reporting requires profile verification.'}
+            </p>
+
+            <div style={styles.modalBtnRow}>
+              <button style={styles.cancelBtn} onClick={() => setShowConfirmModal(false)}>Cancel</button>
+              <button style={styles.confirmSendBtn} onClick={confirmChoiceExecution}>Confirm & Continue</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -88,15 +121,24 @@ const styles = {
   logoText: { fontSize: '18px', fontWeight: '900', color: '#0F172A', letterSpacing: '1px' },
   logoSubtext: { fontSize: '10px', fontWeight: '700', color: '#0F766E', letterSpacing: '0.8px', marginTop: '2px' },
   mainTitle: { color: '#0F172A', fontSize: '22px', fontWeight: '800', margin: '0 0 8px 0', lineHeight: '1.2' },
-  subtitle: { color: '#64748B', fontSize: '13px', lineHeight: '1.5', margin: '0 0 28px 0', padding: '0 8px' },
+  subtitle: { color: '#334155', fontSize: '13px', lineHeight: '1.5', margin: '0 0 28px 0', padding: '0 8px' },
   verificationCard: { backgroundColor: '#F8FAFC', borderRadius: '18px', padding: '20px', border: '1px solid #E2E8F0', textAlign: 'left' },
   sectionHeader: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' },
   cardQuestion: { color: '#0F172A', fontSize: '14px', fontWeight: '700' },
   cardBodyText: { color: '#475569', fontSize: '12px', lineHeight: '1.5', margin: '0 0 20px 0' },
   buttonStack: { display: 'flex', flexDirection: 'column', gap: '12px' },
-  btn: { width: '100%', padding: '14px 16px', borderRadius: '12px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', transition: 'all 0.2s ease' },
+  btn: { width: '100%', padding: '14px 16px', borderRadius: '12px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' },
   btnPrimary: { backgroundColor: '#0F766E', color: '#FFFFFF', boxShadow: '0 4px 14px rgba(15, 118, 110, 0.25)' },
   btnSecondary: { backgroundColor: '#E2E8F0', color: '#334155' },
-  guestNotice: { marginTop: '20px', padding: '14px', backgroundColor: '#FEF3C7', border: '1px solid #FDE68A', color: '#92400E', borderRadius: '12px', fontSize: '11px', textAlign: 'left', lineHeight: '1.5' },
-  footerInfo: { marginTop: '28px', fontSize: '11px', color: '#94A3B8' }
+  footerInfo: { marginTop: '28px', fontSize: '11px', color: '#475569' },
+  modalBackdrop: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, padding: '16px' },
+  modalCard: { backgroundColor: '#FFFFFF', borderRadius: '16px', padding: '18px', maxWidth: '360px', width: '100%', textAlign: 'left' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' },
+  modalTitle: { fontSize: '12px', fontWeight: '800', color: '#0F172A' },
+  closeBtn: { backgroundColor: '#F1F5F9', border: 'none', width: '24px', height: '24px', borderRadius: '50%', fontSize: '11px', fontWeight: '800', cursor: 'pointer' },
+  modalBodyText: { fontSize: '12px', color: '#334155', lineHeight: '1.4', margin: '0 0 6px 0' },
+  modalSubNote: { fontSize: '11px', color: '#334155', lineHeight: '1.4', margin: '0 0 16px 0', backgroundColor: '#F8FAFC', padding: '8px', borderRadius: '8px' },
+  modalBtnRow: { display: 'flex', gap: '8px' },
+  cancelBtn: { flex: 1, padding: '10px', backgroundColor: '#F1F5F9', color: '#475569', border: 'none', borderRadius: '8px', fontSize: '11px', fontWeight: '800', cursor: 'pointer' },
+  confirmSendBtn: { flex: 1, padding: '10px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '11px', fontWeight: '800', cursor: 'pointer' }
 };

@@ -353,7 +353,13 @@ export default function HotlineScreen({ onBack }) {
             <div key={item.id} style={styles.directoryCard}>
               <div style={styles.cardTopRow}>
                 <span style={styles.categoryBadge}>{item.category.replace('_', ' ')}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0F766E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <polyline points="12 6 12 12 16 14"/>
+                </svg>
                 <span style={styles.timeText}>{item.availability}</span>
+              </div>
               </div>
 
               <h4 style={styles.deptTitle}>{item.name}</h4>
@@ -459,10 +465,10 @@ const styles = {
   contactMetaLink: { color: '#0F766E', fontWeight: '700', fontSize: '11px', textDecoration: 'none' },
   mapToggleBtn: { width: '100%', padding: '8px', backgroundColor: '#F0FDF4', color: '#0F766E', border: '1px solid #CCFBF1', borderRadius: '8px', fontSize: '11px', fontWeight: '800', cursor: 'pointer', marginBottom: '10px' },
   mapToggleBtnActive: { width: '100%', padding: '8px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '11px', fontWeight: '800', cursor: 'pointer', marginBottom: '10px' },
-  mapEmbedContainer: { borderRadius: '10px', overflow: 'hidden', border: '1px solid #CBD5E1', marginBottom: '10px', backgroundColor: '#0F172A' },
-  mapHeaderBanner: { backgroundColor: '#1E293B', color: '#38BDF8', fontSize: '9px', fontWeight: '800', padding: '6px', textAlign: 'center' },
+  mapEmbedContainer: { borderRadius: '10px', overflow: 'hidden', border: '1px solid #CBD5E1', marginBottom: '10px', backgroundColor: '#F0FDF4' },
+  mapHeaderBanner: { backgroundColor: '#0F766E', color: '#CCFBF1', fontSize: '9px', fontWeight: '800', padding: '6px', textAlign: 'center' },
   mapIframe: { display: 'block', border: 'none' },
-  mapCaptionTag: { backgroundColor: '#1E293B', color: '#38BDF8', fontSize: '10px', fontWeight: '700', padding: '4px 8px', textAlign: 'center' },
+  mapCaptionTag: { backgroundColor: '#0F766E', color: '#CCFBF1', fontSize: '10px', fontWeight: '700', padding: '4px 8px', textAlign: 'center' },
   callButtonPrimary: { width: '100%', padding: '9px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: '800', cursor: 'pointer' },
   searchContainer: { position: 'relative', marginBottom: '12px' },
   searchInput: { width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #CBD5E1', fontSize: '12px', outline: 'none', boxSizing: 'border-box' },
@@ -480,5 +486,5 @@ const styles = {
   protocolBox: { backgroundColor: '#F8FAFC', borderLeft: '3px solid #0F766E', padding: '6px 8px', borderRadius: '4px', fontSize: '11px', color: '#334155', marginBottom: '10px' },
   cardFooter: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '10px', borderTop: '1px solid #F1F5F9' },
   phoneDisplay: { fontSize: '13px', fontWeight: '800', color: '#0F766E' },
-  dialButton: { backgroundColor: '#0F172A', color: '#FFFFFF', border: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }
+  dialButton: { backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }
 };
