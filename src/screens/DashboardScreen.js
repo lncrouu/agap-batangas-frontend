@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { fetchReports } from '../services/reportService';
 
 export default function DashboardScreen({ onNavigate, userRole = 'GUEST', onOpenProfile }) {
   const [userProfile, setUserProfile] = useState(null);
@@ -11,37 +10,22 @@ export default function DashboardScreen({ onNavigate, userRole = 'GUEST', onOpen
   }, [userRole]);
 
   const fetchDeviceProfile = async () => {
-    try {
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-      if (!user) return;
+    const localDeviceId = localStorage.getItem('agap_device_id');
+    if (!localDeviceId) return;
 
+    try {
       const { data } = await supabase
         .from('profiles')
         .select('*')
-        .eq('auth_user_id', user.id)
+        .eq('device_id', localDeviceId)
         .maybeSingle();
 
       if (data) setUserProfile(data);
     } catch (err) {
-      console.error('Unable to load guest profile:', err.message);
+      console.log('No registered profile for device.');
     }
   };
 
-<<<<<<< HEAD
-  const fetchLiveHazardFeed = async () => {
-    setIsLoadingFeed(true);
-    try {
-      setLiveFeed((await fetchReports({ status: 'APPROVED' })).slice(0, 5));
-    } catch (err) {
-      console.error('Feed error:', err.message);
-    } finally {
-      setIsLoadingFeed(false);
-    }
-  };
-
-=======
->>>>>>> 00f93ad (Admin Update)
   const handleNav = (screenKey) => {
     if (typeof onNavigate === 'function') {
       onNavigate(screenKey);
@@ -121,7 +105,7 @@ export default function DashboardScreen({ onNavigate, userRole = 'GUEST', onOpen
         </button>
       </div>
 
-      {/* Core Functions - 2x2 Grid */}
+      {/* Core Functions - 2x2 Grid with Horizontal Layout */}
       <div style={styles.sectionHeader}>Core Functions</div>
       <div style={styles.grid2x2}>
         {/* 1. Submit Hazard Report */}
@@ -270,6 +254,8 @@ const styles = {
   sosTitle: { fontSize: '11px', fontWeight: '800', color: '#991B1B' },
   sosSub: { fontSize: '10px', color: '#B91C1C' },
   sosButton: { backgroundColor: '#DC2626', color: '#FFFFFF', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: '800', cursor: 'pointer' },
+  
+  // 2x2 Grid with Horizontal Inner Card Layout
   grid2x2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '18px' },
   horizontalCardTeal: { backgroundColor: '#F0FDF4', border: '1px solid #CCFBF1', borderRadius: '14px', padding: '12px', cursor: 'pointer', display: 'flex', flexDirection: 'row', alignItems: 'flex-start', gap: '10px', boxSizing: 'border-box' },
   horizontalCardWhite: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '14px', padding: '12px', cursor: 'pointer', display: 'flex', flexDirection: 'row', alignItems: 'flex-start', gap: '10px', boxSizing: 'border-box', boxShadow: '0 2px 6px rgba(0,0,0,0.03)' },
@@ -279,6 +265,8 @@ const styles = {
   cardTitle: { fontSize: '12px', fontWeight: '800', color: '#0F172A', margin: '0 0 2px 0' },
   cardDesc: { fontSize: '9px', color: '#64748B', lineHeight: '1.3', margin: '0 0 6px 0' },
   cardActionText: { fontSize: '10px', fontWeight: '800', color: '#0F766E' },
+
+  // Emergency SOS Modal
   modalBackdrop: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, padding: '16px' },
   modalCard: { backgroundColor: '#FFFFFF', borderRadius: '18px', padding: '18px', maxWidth: '380px', width: '100%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.3)' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' },

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchReports } from '../services/reportService';
+import { supabase } from '../supabaseClient';
 
 export default function ReportTrackerScreen({ onBack }) {
   const [reports, setReports] = useState([]);
@@ -10,13 +10,22 @@ export default function ReportTrackerScreen({ onBack }) {
   useEffect(() => {
     const localDeviceId = localStorage.getItem('agap_device_id') || '';
     setDeviceId(localDeviceId);
-    fetchUserSubmittedReports();
+    fetchUserSubmittedReports(localDeviceId);
   }, []);
 
-  const fetchUserSubmittedReports = async () => {
+  const fetchUserSubmittedReports = async (targetDeviceId) => {
     setIsLoading(true);
     try {
-      setReports(await fetchReports());
+      let query = supabase.from('reports').select('*').order('created_at', { ascending: false });
+
+      if (targetDeviceId) {
+        query = query.eq('device_id', targetDeviceId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      if (data) setReports(data);
     } catch (err) {
       console.error('Tracker fetch error:', err.message);
     } finally {
@@ -83,13 +92,8 @@ export default function ReportTrackerScreen({ onBack }) {
 
       <div style={styles.refreshBar}>
         <span style={styles.deviceText}>Device ID: {deviceId || 'Detecting...'}</span>
-<<<<<<< HEAD
-        <button style={styles.refreshBtn} onClick={fetchUserSubmittedReports}>
-          Refresh Status
-=======
         <button style={styles.refreshBtn} onClick={() => fetchUserSubmittedReports(deviceId)}>
-          🔄 Refresh Status
->>>>>>> 00f93ad (Admin Update)
+          Refresh Status
         </button>
       </div>
 
@@ -103,18 +107,18 @@ export default function ReportTrackerScreen({ onBack }) {
         reports.map((rep) => {
           const steps = getProgressSteps(rep.status);
           const userEvidencePhotos = parsePhotos(rep.proof_photos || rep.photos);
-          const lguProgressPhotos = parsePhotos(rep.lgu_progress_photos || rep.progress_photo);
+          const lguProgressPhotos = parsePhotos(rep.lgu_progress_photos);
 
           return (
             <div key={rep.id || rep.created_at || rep.ticket_no} style={styles.trackerCard}>
               <div style={styles.cardHeader}>
                 <span style={styles.ticketBadge}>{rep.ticket_no || rep.id}</span>
-                <span style={styles.statusPill}>{(rep.status || 'PENDING').toUpperCase()}</span>
+                <span style={styles.statusPill}>{rep.status || 'PENDING'}</span>
               </div>
 
               <h3 style={styles.hazardTitle}>{rep.hazard_type || rep.category}</h3>
-              <div style={styles.metaText}>📍 Location: {rep.location}</div>
-              <div style={styles.metaText}>🕒 Submitted: {rep.created_at ? new Date(rep.created_at).toLocaleString() : 'Recently'}</div>
+              <div style={styles.metaText}>Location: {rep.location}</div>
+              <div style={styles.metaText}>Submitted: {rep.created_at ? new Date(rep.created_at).toLocaleString() : 'Recently'}</div>
 
               {/* Official CDRRMO Notice Directive */}
               {rep.notice_text && (
@@ -206,19 +210,19 @@ export default function ReportTrackerScreen({ onBack }) {
 const styles = {
   container: { maxWidth: '440px', margin: '0 auto', padding: '16px', fontFamily: "'Inter', sans-serif", boxSizing: 'border-box' },
   navHeader: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' },
-  backBtn: { backgroundColor: 'transparent', border: 'none', color: '#0F766E', fontSize: '14px', fontWeight: '800', cursor: 'pointer' },
+  backBtn: { backgroundColor: 'transparent', border: 'none', color: '#0F766E', fontSize: '14px', fontWeight: '700', cursor: 'pointer' },
   headerTitle: { fontSize: '18px', fontWeight: '800', color: '#0F172A', margin: 0 },
   headerSub: { fontSize: '11px', color: '#64748B' },
   refreshBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', padding: '8px 12px', borderRadius: '10px', marginBottom: '14px' },
-  deviceText: { fontSize: '10px', color: '#334155', fontWeight: '700' },
+  deviceText: { fontSize: '10px', color: '#64748B', fontWeight: '600' },
   refreshBtn: { backgroundColor: '#CCFBF1', color: '#0F766E', border: 'none', padding: '4px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: '800', cursor: 'pointer' },
-  emptyCard: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '12px', padding: '20px', textAlign: 'center', color: '#475569', fontSize: '12px' },
-  trackerCard: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '16px', padding: '14px', marginBottom: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' },
+  emptyCard: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '12px', padding: '20px', textAlign: 'center', color: '#64748B', fontSize: '12px' },
+  trackerCard: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '16px', padding: '14px', marginBottom: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' },
   cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
   ticketBadge: { fontSize: '10px', fontWeight: '800', backgroundColor: '#CCFBF1', color: '#0F766E', padding: '3px 8px', borderRadius: '6px' },
   statusPill: { fontSize: '9px', fontWeight: '800', backgroundColor: '#FEF3C7', color: '#D97706', padding: '3px 8px', borderRadius: '6px' },
   hazardTitle: { fontSize: '15px', fontWeight: '800', color: '#0F172A', margin: '0 0 4px 0' },
-  metaText: { fontSize: '11px', color: '#334155', fontWeight: '600', margin: '2px 0' },
+  metaText: { fontSize: '11px', color: '#64748B', margin: '2px 0' },
   
   noticeCard: { backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '10px', padding: '10px', marginTop: '10px' },
   lguPhotoCard: { backgroundColor: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '10px', padding: '10px', marginTop: '10px' },
@@ -234,7 +238,7 @@ const styles = {
   linePending: { width: '2px', height: '28px', backgroundColor: '#E2E8F0', marginTop: '2px' },
   contentCol: { display: 'flex', flexDirection: 'column', justifyContent: 'center' },
   stepTitleDone: { fontSize: '12px', fontWeight: '800', color: '#0F172A' },
-  stepTitlePending: { fontSize: '12px', fontWeight: '600', color: '#475569' },
+  stepTitlePending: { fontSize: '12px', fontWeight: '600', color: '#94A3B8' },
   stepSubtitle: { fontSize: '10px', color: '#64748B' },
 
   evidenceSection: { marginTop: '12px', paddingTop: '8px', borderTop: '1px solid #F1F5F9' },

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { submitHazardReport } from '../services/reportService';
+import { supabase } from '../supabaseClient';
 
 export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
   const [hazardTitle, setHazardTitle] = useState('');
-  const [severityLevel, setSeverityLevel] = useState(''); // Starts empty/unselected
+  const [severityLevel, setSeverityLevel] = useState('HIGH');
   const [locationName, setLocationName] = useState('');
   const [latitude, setLatitude] = useState(13.7565);
   const [longitude, setLongitude] = useState(121.0583);
@@ -11,11 +11,6 @@ export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
   const [description, setDescription] = useState('');
   const [photosList, setPhotosList] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  
-  // System Pop-up Notification State
-  const [systemPopupNotice, setSystemPopupNotice] = useState(null);
-
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markerInstanceRef = useRef(null);
@@ -68,15 +63,8 @@ export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
     };
   }, []);
 
-  const triggerSystemPopup = (title, message) => {
-    setSystemPopupNotice({ title, message });
-  };
-
   const handleGetLocation = () => {
-    if (!navigator.geolocation) {
-      triggerSystemPopup('GPS UNSUPPORTED', 'GPS location positioning is not supported on this device.');
-      return;
-    }
+    if (!navigator.geolocation) return alert('GPS not supported on this device.');
     setIsGpsLoading(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -93,7 +81,7 @@ export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
       },
       () => {
         setIsGpsLoading(false);
-        triggerSystemPopup('LOCATION NOTICE', 'Could not fetch current GPS position. Tap map to pin location manually.');
+        alert('Could not fetch location. Tap map to pin manually.');
       }
     );
   };
@@ -121,76 +109,25 @@ export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
     });
   };
 
-  const handlePreSubmitCheck = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!hazardTitle.trim()) return alert('Please specify the hazard or issue title.');
+    if (!locationName.trim()) return alert('Please specify or pin the location landmark.');
+    if (photosList.length === 0) return alert('Mandatory Photo Proof Required! Please attach at least one photo or picture as evidence of the hazard before submitting your report.');
 
-    if (!hazardTitle.trim()) {
-      triggerSystemPopup(
-        'MISSING HAZARD TITLE',
-        'Please enter a Hazard / Issue Title (e.g., Flash Flooding, Fallen Electric Pole) before submitting.'
-      );
-      return;
-    }
-
-    if (!severityLevel) {
-      triggerSystemPopup(
-        'SEVERITY LEVEL REQUIRED',
-        'Please select a Severity Urgency Level (LOW, MODERATE, SEVERE, or CRITICAL) before submitting your hazard report.'
-      );
-      return;
-    }
-
-    if (!locationName.trim()) {
-      triggerSystemPopup(
-        'LOCATION LANDMARK REQUIRED',
-        'Please specify or pin the Location Landmark on the map before submitting.'
-      );
-      return;
-    }
-
-    if (photosList.length === 0) {
-      triggerSystemPopup(
-        'MANDATORY EVIDENCE PHOTO REQUIRED',
-        'Please attach at least 1 evidence photo of the hazard before submitting.'
-      );
-      return;
-    }
-
-    if (!description.trim()) {
-      triggerSystemPopup(
-        'REMARKS REQUIRED',
-        'Please enter descriptive remarks and situation details before submitting.'
-      );
-      return;
-    }
-
-    setShowConfirmModal(true);
-  };
-
-  const executeFinalSubmission = async () => {
-    setShowConfirmModal(false);
     setIsSubmitting(true);
     try {
-<<<<<<< HEAD
-
-=======
       const { count, error: countErr } = await supabase.from('reports').select('*', { count: 'exact', head: true });
       const seq = (countErr || count === null) ? 1 : count + 1;
       const ticketNo = `#AGAP-2026-${String(seq).padStart(4, '0')}`;
->>>>>>> 00f93ad (Admin Update)
       const localDeviceId = localStorage.getItem('agap_device_id') || 'GUEST-DEV';
       const photoPayload = JSON.stringify(photosList.map((p) => p.base64));
 
       const payload = {
-<<<<<<< HEAD
-        category: hazardType,
-        hazard_type: hazardType,
-=======
         id: ticketNo,
         ticket_no: ticketNo,
         category: hazardTitle,
         hazard_type: hazardTitle,
->>>>>>> 00f93ad (Admin Update)
         severity: severityLevel,
         location: locationName,
         coordinates: `${latitude}, ${longitude}`,
@@ -201,29 +138,16 @@ export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
         photos: photoPayload
       };
 
-      const savedReport = await submitHazardReport(payload);
+      const { error } = await supabase.from('reports').insert([payload]);
+      if (error) throw error;
 
-<<<<<<< HEAD
-      alert(`✓ Hazard Report Transmitted!\nTicket Ref: ${savedReport.ticket_no}\nStatus: PENDING TRIAGE`);
-=======
-      alert(`✅ Hazard Report Transmitted!\nTicket Ref: ${ticketNo}\nStatus: PENDING TRIAGE`);
->>>>>>> 00f93ad (Admin Update)
+      alert(`Hazard Report Transmitted!\nTicket Ref: ${ticketNo}\nStatus: PENDING TRIAGE`);
       if (onSubmitSuccess) onSubmitSuccess();
     } catch (err) {
-      triggerSystemPopup('SUBMISSION FAILED', err.message);
+      alert(`Submission failed: ${err.message}`);
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const getSeverityBtnStyle = (s) => {
-    if (severityLevel === s) {
-      if (s === 'CRITICAL') return styles.sevBtnCriticalActive;
-      if (s === 'SEVERE') return styles.sevBtnSevereActive;
-      if (s === 'MODERATE') return styles.sevBtnModerateActive;
-      return styles.sevBtnLowActive;
-    }
-    return styles.sevBtnInactive;
   };
 
   return (
@@ -236,7 +160,7 @@ export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
         </div>
       </div>
 
-      <form noValidate onSubmit={handlePreSubmitCheck} style={styles.formCard}>
+      <form onSubmit={handleSubmit} style={styles.formCard}>
         <div style={styles.formGroup}>
           <label style={styles.label}>1. HAZARD / ISSUE TITLE *</label>
           <input
@@ -245,6 +169,7 @@ export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
             placeholder="e.g. Flash Flooding at Rizal Ave, Fallen Electric Pole..."
             value={hazardTitle}
             onChange={(e) => setHazardTitle(e.target.value)}
+            required
           />
         </div>
 
@@ -255,7 +180,7 @@ export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
               <button
                 key={s}
                 type="button"
-                style={getSeverityBtnStyle(s)}
+                style={severityLevel === s ? styles.sevBtnActive : styles.sevBtnInactive}
                 onClick={() => setSeverityLevel(s)}
               >
                 {s}
@@ -277,6 +202,7 @@ export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
             value={locationName}
             onChange={(e) => setLocationName(e.target.value)}
             placeholder="Landmark / Street Address..."
+            required
           />
           <div style={styles.mapBox}>
             <div ref={mapContainerRef} style={{ width: '100%', height: '170px' }}></div>
@@ -302,11 +228,11 @@ export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
         </div>
 
         <div style={styles.formGroup}>
-          <label style={styles.label}>5. REMARKS & SITUATION DETAILS *</label>
+          <label style={styles.label}>5. REMARKS & SITUATION DETAILS</label>
           <textarea
             style={styles.textarea}
             rows="3"
-            placeholder="Describe current situation details..."
+            placeholder="Describe current situation..."
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
@@ -316,51 +242,6 @@ export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
           {isSubmitting ? 'Transmitting Alert...' : 'Submit Report to LGU Command Center'}
         </button>
       </form>
-
-      {/* SYSTEM POP-UP NOTIFICATION MODAL */}
-      {systemPopupNotice && (
-        <div style={styles.modalBackdrop} onClick={() => setSystemPopupNotice(null)}>
-          <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalHeader}>
-              <span style={styles.modalTitleRed}>⚠️ {systemPopupNotice.title}</span>
-              <button style={styles.closeBtn} onClick={() => setSystemPopupNotice(null)}>✕</button>
-            </div>
-            <p style={styles.modalBodyText}>
-              {systemPopupNotice.message}
-            </p>
-            <button style={styles.popupCloseBtn} onClick={() => setSystemPopupNotice(null)}>
-              Understand & Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 2nd Verification Confirmation Modal */}
-      {showConfirmModal && (
-        <div style={styles.modalBackdrop} onClick={() => setShowConfirmModal(false)}>
-          <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalHeader}>
-              <span style={styles.modalTitle}>SUBMISSION VERIFICATION</span>
-              <button style={styles.closeBtn} onClick={() => setShowConfirmModal(false)}>✕</button>
-            </div>
-            <p style={styles.modalBodyText}>
-              Are you sure you are ready to transmit this hazard report to the <strong>CDRRMO Batangas Command Center</strong>?
-            </p>
-            <div style={styles.confirmSummaryBox}>
-              <div><strong>Hazard:</strong> {hazardTitle}</div>
-              <div><strong>Severity:</strong> {severityLevel}</div>
-              <div><strong>Location:</strong> {locationName}</div>
-              <div><strong>Evidence Photos:</strong> {photosList.length} photo(s) attached</div>
-            </div>
-            <div style={styles.modalBtnRow}>
-              <button style={styles.cancelBtn} onClick={() => setShowConfirmModal(false)}>Review</button>
-              <button style={styles.confirmSendBtn} onClick={executeFinalSubmission} disabled={isSubmitting}>
-                {isSubmitting ? 'Transmitting...' : 'Confirm & Transmit Alert'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -368,19 +249,16 @@ export default function ReportSubmitScreen({ onBack, onSubmitSuccess }) {
 const styles = {
   container: { maxWidth: '440px', margin: '0 auto', padding: '16px', fontFamily: "'Inter', sans-serif", boxSizing: 'border-box' },
   navHeader: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' },
-  backBtn: { backgroundColor: '#F1F5F9', border: 'none', color: '#0F766E', padding: '6px 12px', borderRadius: '6px', fontSize: '11px', fontWeight: '800', cursor: 'pointer' },
+  backBtn: { backgroundColor: 'transparent', border: 'none', color: '#0F766E', fontSize: '14px', fontWeight: '700', cursor: 'pointer' },
   headerTitle: { fontSize: '18px', fontWeight: '800', color: '#0F172A', margin: 0 },
   headerSub: { fontSize: '11px', color: '#64748B' },
-  formCard: { backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '14px', padding: '16px', boxShadow: '0 2px 6px rgba(0,0,0,0.04)' },
+  formCard: { backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '16px', padding: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' },
   formGroup: { marginBottom: '14px' },
   label: { fontSize: '10px', fontWeight: '800', color: '#64748B', display: 'block', marginBottom: '6px' },
   grid3: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginBottom: '8px' },
   grid4: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '4px' },
-  sevBtnLowActive: { padding: '8px 4px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '10px', fontWeight: '800', cursor: 'pointer' },
-  sevBtnModerateActive: { padding: '8px 4px', backgroundColor: '#D97706', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '10px', fontWeight: '800', cursor: 'pointer' },
-  sevBtnSevereActive: { padding: '8px 4px', backgroundColor: '#EA580C', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '10px', fontWeight: '800', cursor: 'pointer' },
-  sevBtnCriticalActive: { padding: '8px 4px', backgroundColor: '#DC2626', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '10px', fontWeight: '800', cursor: 'pointer' },
-  sevBtnInactive: { padding: '8px 4px', backgroundColor: '#F1F5F9', color: '#64748B', border: '1px solid #CBD5E1', borderRadius: '6px', fontSize: '10px', fontWeight: '600', cursor: 'pointer' },
+  sevBtnActive: { padding: '8px 4px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontSize: '10px', fontWeight: '800', cursor: 'pointer' },
+  sevBtnInactive: { padding: '8px 4px', backgroundColor: '#F1F5F9', color: '#64748B', border: 'none', borderRadius: '6px', fontSize: '10px', fontWeight: '600', cursor: 'pointer' },
   rowBetween: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' },
   gpsBtn: { backgroundColor: '#CCFBF1', border: '1px solid #99F6E4', color: '#0F766E', padding: '3px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: '800', cursor: 'pointer' },
   input: { width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '12px', boxSizing: 'border-box' },
@@ -392,17 +270,5 @@ const styles = {
   dropzone: { border: '2px dashed #0F766E', backgroundColor: '#F0FDF4', padding: '10px', borderRadius: '8px', display: 'flex', justifyContent: 'center', cursor: 'pointer' },
   dropText: { fontSize: '11px', fontWeight: '800', color: '#0F766E' },
   submitBtn: { width: '100%', padding: '12px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '800', cursor: 'pointer', marginTop: '8px' },
-  submitBtnDisabled: { width: '100%', padding: '12px', backgroundColor: '#94A3B8', color: '#FFFFFF', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '800', cursor: 'not-allowed', marginTop: '8px' },
-  modalBackdrop: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, padding: '16px' },
-  modalCard: { backgroundColor: '#FFFFFF', borderRadius: '16px', padding: '18px', maxWidth: '360px', width: '100%' },
-  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' },
-  modalTitle: { fontSize: '12px', fontWeight: '800', color: '#0F172A' },
-  modalTitleRed: { fontSize: '12px', fontWeight: '800', color: '#DC2626' },
-  closeBtn: { backgroundColor: '#F1F5F9', border: 'none', width: '24px', height: '24px', borderRadius: '50%', fontSize: '11px', fontWeight: '800', cursor: 'pointer' },
-  modalBodyText: { fontSize: '12px', color: '#334155', lineHeight: '1.4', margin: '0 0 10px 0' },
-  confirmSummaryBox: { backgroundColor: '#F8FAFC', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '10px', fontSize: '11px', color: '#0F172A', marginBottom: '14px', display: 'flex', flexDirection: 'column', gap: '4px' },
-  modalBtnRow: { display: 'flex', gap: '8px' },
-  cancelBtn: { flex: 1, padding: '9px', backgroundColor: '#F1F5F9', color: '#475569', border: 'none', borderRadius: '8px', fontSize: '11px', fontWeight: '800', cursor: 'pointer' },
-  confirmSendBtn: { flex: 1, padding: '9px', backgroundColor: '#0F766E', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '11px', fontWeight: '800', cursor: 'pointer' },
-  popupCloseBtn: { width: '100%', padding: '10px', backgroundColor: '#DC2626', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '11px', fontWeight: '800', cursor: 'pointer', marginTop: '10px' }
+  submitBtnDisabled: { width: '100%', padding: '12px', backgroundColor: '#94A3B8', color: '#FFFFFF', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '800', cursor: 'not-allowed', marginTop: '8px' }
 };

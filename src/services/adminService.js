@@ -1,51 +1,31 @@
-import { adminSupabase } from '../supabaseClient';
-
-const API_BASE_URL = `${process.env.REACT_APP_API_BASE_URL || 'http://localhost:8080/api'}/admin`;
-
-const request = async (path, options = {}) => {
-  const { data: { session }, error: sessionError } = await adminSupabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  if (!session?.access_token) throw new Error('Administrator sign-in is required.');
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...options.headers
-    }
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Administrator request failed.');
-  return data;
-};
+const API_BASE_URL = 'http://localhost:8080/api/admin';
 
 export const fetchAdminReports = async () => {
-  return request('/reports');
-};
-
-export const verifyAdminAccess = async () => {
-  return request('/session');
+  try {
+    const response = await fetch(`${API_BASE_URL}/reports`);
+    if (!response.ok) throw new Error('Failed to fetch admin reports');
+    return await response.json();
+  } catch (err) {
+    console.warn('Backend offline, using fallback reports data:', err.message);
+    return null; 
+  }
 };
 
 export const updateReportStatusInDb = async (reportId, status, noticeText) => {
-  return request(`/reports/${encodeURIComponent(reportId)}/status`, {
-    method: 'PUT',
-    body: JSON.stringify({ status, noticeText })
-  });
-};
-
-export const deleteRejectedReportsInDb = async () => {
-  return request('/reports/rejected', { method: 'DELETE' });
+  try {
+    const response = await fetch(`${API_BASE_URL}/reports/${reportId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, noticeText })
+    });
+    return await response.json();
+  } catch (err) {
+    console.warn('Backend update offline, updating local state:', err.message);
+    return { success: true };
+  }
 };
 
 export const banDeviceInDb = async (deviceId) => {
-<<<<<<< HEAD
-  return request(`/devices/${encodeURIComponent(deviceId)}/ban`, {
-    method: 'POST'
-  });
-};
-=======
   try {
     const response = await fetch(`${API_BASE_URL}/devices/${deviceId}/ban`, {
       method: 'POST'
@@ -56,28 +36,3 @@ export const banDeviceInDb = async (deviceId) => {
     return { success: true };
   }
 };
-
-// frontend-js/src/services/adminService.js
-
-export async function sendBackendNotification(userObj, reportObj, messageText) {
-  try {
-    const response = await fetch('http://localhost:8080/api/reports/notify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deviceId: userObj.device_id,
-        phoneNumber: userObj.phone_number,
-        verificationStatus: userObj.verification_status,
-        ticketNo: reportObj.id || reportObj.ticket_no,
-        messageText: messageText
-      })
-    });
-    
-    const data = await response.json();
-    console.log('Java Backend Response:', data);
-    return data;
-  } catch (err) {
-    console.error('Failed to connect to Java backend:', err.message);
-  }
-}
->>>>>>> 00f93ad (Admin Update)
