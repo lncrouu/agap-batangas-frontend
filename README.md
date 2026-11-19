@@ -1,5 +1,4 @@
 # AGAP Android App
-
 The React app is packaged as an Android app with Capacitor. During local phone
 testing, it connects to the Java backend running on your computer. Supabase Auth
 and PostgreSQL remain hosted remotely; guests use anonymous Supabase sign-in.
@@ -62,3 +61,32 @@ before launching the app again. If the computer's Wi-Fi IP changes, update
 
 The normal `npm run android:sync` uses the default Capacitor configuration,
 which does not enable the local HTTP scheme.
+
+
+## About the Project
+
+AGAP Batangas is a mobile web and Android app that connects Batangas residents with their barangay during emergencies and community incidents. Residents can call emergency services, report hazards, follow the status of their reports, and see danger zones near them. A civic points system (AGAP Points) rewards residents who take part.
+
+## Features
+
+- **Immediate Dispatch Hotlines:** one-tap SOS calling for emergencies.
+- **Hotline Directory:** contact details for PNP, BFP, CDRRMO and other services, suggested by GPS location.
+- **Barangay Community Advisory:** announcements and alerts from the barangay.
+- **Report Hazard or Incident:** residents submit reports from their phone.
+- **Report Tracker and Civic Points:** residents follow the status of their own reports and earn AGAP Points.
+- **Danger Zone Map:** live GPS with verified hazards pinned on the map.
+
+## User Roles
+
+| Role | Access |
+|------|--------|
+| Guest | Dashboard, hotlines, map zone, limited profile |
+| Citizen | Verified profile, report submission, report tracker, civic points |
+| Admin | Review submitted reports, analytics and map, user handling, device and user verification |
+
+## Tech Stack
+
+- **Frontend:** React, packaged as an Android app with Capacitor
+- **Backend:** Java (Spring Boot) REST API
+- **Database:** Supabase (PostgreSQL)
+- **Deployment:** Vercel
