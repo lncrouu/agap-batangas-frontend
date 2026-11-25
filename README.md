@@ -90,3 +90,7 @@ AGAP Batangas is a mobile web and Android app that connects Batangas residents w
 - **Backend:** Java (Spring Boot) REST API
 - **Database:** Supabase (PostgreSQL)
 - **Deployment:** Vercel
+
+## Significance
+
+- **Hazards**
